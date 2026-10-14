@@ -1,0 +1,1 @@
+{"timestamp":"2026-10-14T19:20:55.899Z","type":"scan","symbol":"TEST","data":{"price":105,"candles_count":1,"latest_candle":{"timestamp":"2026-10-14T19:20:55.899Z","open":100,"high":110,"low":95,"close":105,"volume":1000},"signals":[{"strategy":"rsi-reversion","action":"buy","strength":0.8,"reason":"test","indicators":{}}]}}

@@ -30,6 +30,17 @@ const envSchema = z.object({
   // Server
   PORT: z.coerce.number().default(3000),
   LOG_LEVEL: z.string().default('info'),
+
+  // Telegram
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_CHAT_ID: z.string().optional(),
+
+  // Watchlist (comma-separated symbols like "RELIANCE,INFY,TCS")
+  WATCHLIST: z.string().default('RELIANCE'),
+
+  // Scan config
+  SCAN_INTERVAL_MIN: z.coerce.number().default(10), // minutes between scans
+  ENABLE_EMAIL_REPORTS: z.string().default('false'),
 });
 
 export type Env = z.infer<typeof envSchema>;

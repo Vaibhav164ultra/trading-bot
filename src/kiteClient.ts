@@ -5,6 +5,7 @@
 import { KiteConnect } from 'kiteconnect';
 import { getConfig } from './config.js';
 import type { Candle } from './types.js';
+import { getHistoricalData } from './historicalData.js';
 
 export class KiteClient {
   private kite: any;
@@ -41,7 +42,19 @@ export class KiteClient {
   }
 
   async getQuote(instruments: string | string[]): Promise<any> {
-    return await this.kite.getQuote(instruments);
+    // Fallback to historical candles if getQuote permission is not active on free tier
+    const token = Array.isArray(instruments) ? instruments[0] : instruments;
+    const candles = await this.getHistoricalCandles(Number(token), 2, 'day');
+    const latest = candles[candles.length - 1];
+    return {
+      [token]: {
+        instrument_token: Number(token),
+        last_price: latest.close,
+        ohlc: { open: latest.open, high: latest.high, low: latest.low, close: latest.close },
+        volume: latest.volume,
+        timestamp: latest.timestamp,
+      }
+    };
   }
 
   async getOHLC(instruments: string | string[]): Promise<any> {
@@ -60,23 +73,17 @@ export class KiteClient {
   }
 
   async getHistoricalCandles(
-    instrumentToken: number | string,
+    instrumentToken: number,
     days: number,
     interval: any = 'day'
   ): Promise<Candle[]> {
-    const to = new Date();
-    const from = new Date();
-    from.setDate(from.getDate() - days);
+    const config = getConfig();
+    // For NSE instruments, we can map token to symbol for fallback
+    const nseInstruments = await this.getInstruments('NSE');
+    const instrument = nseInstruments.find((i: any) => i.instrument_token == instrumentToken);
+    const fallbackSymbol = instrument?.tradingsymbol;
 
-    const data = await this.getHistoricalData(instrumentToken, interval, from, to);
-    return data.map((d: any) => ({
-      timestamp: new Date(d.date),
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-      volume: d.volume,
-    }));
+    return getHistoricalData(this.kite, instrumentToken, days, interval, fallbackSymbol);
   }
 
   // -------------------------------------------------------------------

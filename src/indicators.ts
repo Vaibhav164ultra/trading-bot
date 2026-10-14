@@ -37,7 +37,7 @@ function ema(values: number[], period: number): number[] {
   return result;
 }
 
-function rsi(values: number[], period: number = 14): number[] {
+export function rsi(values: number[], period: number = 14): number[] {
   const result: number[] = [];
   const gains: number[] = [];
   const losses: number[] = [];

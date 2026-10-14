@@ -5,6 +5,7 @@
 import { getConfig } from './config.js';
 import type { Candle, PaperPosition, RiskMetrics, StrategySignal, Strategy } from './types.js';
 import { getKiteClient } from './kiteClient.js';
+import { TelegramNotifier } from './telegram.js';
 
 export class PaperTradingEngine {
   private config = getConfig();
@@ -15,9 +16,11 @@ export class PaperTradingEngine {
   private currentEquity = 100000;
   private strategy: Strategy;
   private kiteClient = getKiteClient();
+  private telegram: TelegramNotifier;
 
   constructor(strategy: Strategy) {
     this.strategy = strategy;
+    this.telegram = new TelegramNotifier();
   }
 
   async initialize(): Promise<void> {
@@ -37,7 +40,15 @@ export class PaperTradingEngine {
         this.config.HISTORICAL_DAYS,
         this.config.TIMEFRAME
       );
-      return await this.strategy.analyze(candles);
+      const signal = await this.strategy.analyze(candles);
+
+      // Send Telegram alert only for strong buy/sell signals (strength > 0.6)
+      if (signal.action !== 'hold' && signal.strength > 0.6) {
+        const currentPrice = candles[candles.length - 1].close;
+        await this.telegram.sendSignalAlert(symbol, this.strategy.name, signal, currentPrice, candles.length);
+      }
+
+      return signal;
     } catch (error) {
       console.error(`Error analyzing ${symbol}:`, error);
       return { action: 'hold', strength: 0, reason: 'Analysis failed', indicators: {} };
@@ -94,6 +105,10 @@ export class PaperTradingEngine {
 
     this.positions.set(symbol, position);
     console.log(`Opened ${side} position: ${symbol} x${quantity} @ ${entryPrice} (SL: ${stopLoss.toFixed(2)}, Target: ${targetPrice.toFixed(2)})`);
+
+    // Send Telegram notification
+    await this.telegram.sendPositionOpen(position);
+
     return position;
   }
 
@@ -148,7 +163,7 @@ export class PaperTradingEngine {
     }
   }
 
-  closePosition(symbol: string, reason: string = 'Manual'): PaperPosition | null {
+  async closePosition(symbol: string, reason: string = 'Manual'): Promise<PaperPosition | null> {
     const position = this.positions.get(symbol);
     if (!position) return null;
 
@@ -167,6 +182,10 @@ export class PaperTradingEngine {
     this.positions.delete(symbol);
 
     console.log(`Closed ${position.side} position: ${symbol} - ${reason} | P&L: ${position.pnl.toFixed(2)} (${position.pnlPct.toFixed(2)}%)`);
+
+    // Send Telegram notification
+    await this.telegram.sendPositionClose(position, reason);
+
     return position;
   }
 

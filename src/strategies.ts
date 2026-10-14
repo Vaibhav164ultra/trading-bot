@@ -3,7 +3,7 @@
  */
 
 import type { Candle, Strategy, StrategySignal, BacktestResult, BacktestTrade, IndicatorResult } from './types.js';
-import { calculateAllIndicators } from './indicators.js';
+import { calculateAllIndicators, rsi } from './indicators.js';
 
 // ---------------------------------------------------------------------------
 // Base Strategy Class
@@ -364,6 +364,213 @@ export class BollingerBandsStrategy extends BaseStrategy {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Small-margin Strategy: Conservative RSI
+// ---------------------------------------------------------------------------
+
+export class ConservativeRSIStrategy extends BaseStrategy {
+  name = 'Conservative RSI';
+  description = 'Only trade when RSI is deeply oversold (>35% below 30) or overbought (>35% above 70), with extra confirmation';
+
+  private period: number;
+
+  constructor(period: number = 14) {
+    super();
+    this.period = period;
+  }
+
+  async analyze(candles: Candle[]): Promise<StrategySignal> {
+    return this.generateSignal(candles);
+  }
+
+  protected generateSignal(candles: Candle[]): StrategySignal {
+    if (candles.length < this.period + 1) {
+      return { action: 'hold', strength: 0, reason: 'Insufficient data', indicators: {} };
+    }
+
+    const indicators = calculateAllIndicators(candles);
+    const rsi = indicators[`RSI${this.period}`].values;
+    const currentRSI = rsi[rsi.length - 1];
+
+    if (isNaN(currentRSI)) {
+      return { action: 'hold', strength: 0, reason: 'RSI not ready', indicators: {} };
+    }
+
+    // Only take very extreme signals: deeply oversold (<20) or overbought (>80)
+    if (currentRSI < 20) {
+      return {
+        action: 'buy',
+        strength: (30 - currentRSI) / 30, // 0.3 to 1.0
+        reason: `RSI (${currentRSI.toFixed(1)}) deeply oversold (<20)`,
+        indicators: { rsi: currentRSI },
+      };
+    } else if (currentRSI > 80) {
+      return {
+        action: 'sell',
+        strength: (currentRSI - 80) / 30,
+        reason: `RSI (${currentRSI.toFixed(1)}) deeply overbought (>80)`,
+        indicators: { rsi: currentRSI },
+      };
+    }
+
+    return {
+      action: 'hold',
+      strength: 0.1,
+      reason: `RSI (${currentRSI.toFixed(1)}) in caution zone`,
+      indicators: { rsi: currentRSI },
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Small-margin Strategy: Tight Bollinger Bands
+// ---------------------------------------------------------------------------
+
+export class TightBollingerBandsStrategy extends BaseStrategy {
+  name = 'Tight BBands';
+  description = 'Trade when price touches outer bands with tight squeeze — high momentum revert';
+
+  private period: number;
+  private stdDev: number;
+
+  constructor(period: number = 20, stdDev: number = 2) {
+    super();
+    this.period = period;
+    this.stdDev = stdDev;
+  }
+
+  async analyze(candles: Candle[]): Promise<StrategySignal> {
+    return this.generateSignal(candles);
+  }
+
+  protected generateSignal(candles: Candle[]): StrategySignal {
+    if (candles.length < this.period + 1) {
+      return { action: 'hold', strength: 0, reason: 'Insufficient data', indicators: {} };
+    }
+
+    const indicators = calculateAllIndicators(candles);
+    const closes = candles.map((c) => c.close);
+    const currentClose = closes[closes.length - 1];
+
+    const bb = calculateBollingerBandsValues(closes, this.period, this.stdDev);
+    const currentUpper = bb.upper[bb.upper.length - 1];
+    const currentLower = bb.lower[bb.lower.length - 1];
+
+    if (isNaN(currentUpper) || isNaN(currentLower)) {
+      return { action: 'hold', strength: 0, reason: 'Bollinger Bands not ready', indicators: {} };
+    }
+
+    const pctB = (currentClose - currentLower) / (currentUpper - currentLower);
+
+    // Price at or below lower band — strong buy signal
+    if (pctB <= 0) {
+      return {
+        action: 'buy',
+        strength: 0.9,
+        reason: `Price at/below lower BB (${currentClose.toFixed(2)} <= ${currentLower.toFixed(2)})`,
+        indicators: { close: currentClose, upper: currentUpper, lower: currentLower, pctB },
+      };
+    }
+    // Price at or above upper band — strong sell signal
+    else if (pctB >= 1) {
+      return {
+        action: 'sell',
+        strength: 0.9,
+        reason: `Price at/above upper BB (${currentClose.toFixed(2)} >= ${currentUpper.toFixed(2)})`,
+        indicators: { close: currentClose, upper: currentUpper, lower: currentLower, pctB },
+      };
+    }
+
+    // Price within but near bands
+    if (pctB < 0.1) {
+      return {
+        action: 'buy',
+        strength: 0.6,
+        reason: `Price near lower BB (${(pctB * 100).toFixed(1)}% from lower)`,
+        indicators: { close: currentClose, upper: currentUpper, lower: currentLower, pctB },
+      };
+    } else if (pctB > 0.9) {
+      return {
+        action: 'sell',
+        strength: 0.6,
+        reason: `Price near upper BB (${((1 - pctB) * 100).toFixed(1)}% from upper)`,
+        indicators: { close: currentClose, upper: currentUpper, lower: currentLower, pctB },
+      };
+    }
+
+    return {
+      action: 'hold',
+      strength: 0.1,
+      reason: `Price within bands (${(pctB * 100).toFixed(1)}% from lower)`,
+      indicators: { close: currentClose, upper: currentUpper, lower: currentLower, pctB },
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Small-margin Strategy: Scalper (quick entries/exits)
+// ---------------------------------------------------------------------------
+
+export class ScalperStrategy extends BaseStrategy {
+  name = 'Scalper';
+  description = 'Very short-term — captures small moves, tight stops, quick targets';
+
+  private rsiPeriod: number;
+  private takeProfitPct: number;
+  private stopLossPct: number;
+
+  constructor(rsiPeriod: number = 7, takeProfitPct: number = 0.5, stopLossPct: number = 0.3) {
+    super();
+    this.rsiPeriod = rsiPeriod;
+    this.takeProfitPct = takeProfitPct;
+    this.stopLossPct = stopLossPct;
+  }
+
+  async analyze(candles: Candle[]): Promise<StrategySignal> {
+    return this.generateSignal(candles);
+  }
+
+  protected generateSignal(candles: Candle[]): StrategySignal {
+    if (candles.length < this.rsiPeriod + 1) {
+      return { action: 'hold', strength: 0, reason: 'Insufficient data', indicators: {} };
+    }
+
+    const closes = candles.map(c => c.close);
+    const rsiValues = rsi(closes, this.rsiPeriod);
+    const currentRSI = rsiValues[rsiValues.length - 1];
+
+    if (isNaN(currentRSI)) {
+      return { action: 'hold', strength: 0, reason: 'RSI not ready', indicators: {} };
+    }
+
+    // RSI < 30 → buy with tight stops
+    if (currentRSI < 30) {
+      return {
+        action: 'buy',
+        strength: (30 - currentRSI) / 30,
+        reason: `RSI ${currentRSI.toFixed(1)} oversold — scalper buy`,
+        indicators: { rsi: currentRSI },
+      };
+    }
+    // RSI > 70 → sell
+    else if (currentRSI > 70) {
+      return {
+        action: 'sell',
+        strength: (currentRSI - 70) / 30,
+        reason: `RSI ${currentRSI.toFixed(1)} overbought — scalper sell`,
+        indicators: { rsi: currentRSI },
+      };
+    }
+
+    return {
+      action: 'hold',
+      strength: 0.1,
+      reason: `RSI ${currentRSI.toFixed(1)} neutral - wait`,
+      indicators: { rsi: currentRSI },
+    };
+  }
+}
+
 // Helper function for Bollinger Bands
 function calculateBollingerBandsValues(values: number[], period: number, stdDev: number): { upper: number[]; middle: number[]; lower: number[] } {
   const middle = sma(values, period);
@@ -409,6 +616,9 @@ export const STRATEGIES: Record<string, () => Strategy> = {
   'rsi-reversion': () => new RSIMeanReversionStrategy(),
   'macd': () => new MACDStrategy(),
   'bollinger-bands': () => new BollingerBandsStrategy(),
+  'conservative-rsi': () => new ConservativeRSIStrategy(),
+  'tight-bbands': () => new TightBollingerBandsStrategy(),
+  'scalper': () => new ScalperStrategy(),
 };
 
 export function getStrategy(name: string): Strategy | null {

@@ -8,16 +8,29 @@ import { getConfig } from './config.js';
 import { KiteClient } from './kiteClient.js';
 import { getStrategy, listStrategies } from './strategies.js';
 import { PaperTradingEngine } from './paperTrading.js';
+import { TelegramNotifier } from './telegram.js';
+import { AutoTrader } from './autoTrader.js';
 import type { Candle, StrategySignal } from './types.js';
 
 async function main() {
   const config = getConfig();
+  const isAutoMode = process.argv.includes('--auto') || process.argv.includes('--scan');
+
   console.log('🚀 Zerodha Trading System Starting...');
-  console.log(`Mode: ${config.TRADING_MODE}`);
+  console.log(`Mode: ${isAutoMode ? '🔄 AUTO-SCAN' : '📊 ONE-TIME ANALYSIS'}`);
   console.log(`Timeframe: ${config.TIMEFRAME}`);
   console.log(`Historical Days: ${config.HISTORICAL_DAYS}`);
+  console.log(`Watchlist: ${config.WATCHLIST}`);
 
   const kiteClient = new KiteClient(config.KITE_ACCESS_TOKEN);
+  const telegram = new TelegramNotifier();
+
+  // Test Telegram connection immediately
+  if (telegram.isConnected) {
+    console.log('📱 Testing Telegram connection...');
+    await telegram.testConnection();
+    console.log('✅ Telegram test message sent! Check your bot.');
+  }
 
   // Show login URL if no access token
   if (!config.KITE_ACCESS_TOKEN) {
@@ -28,75 +41,94 @@ async function main() {
     return;
   }
 
-  // List available strategies
-  console.log('\n📊 Available Strategies:');
-  for (const name of listStrategies()) {
-    const strategy = getStrategy(name);
-    if (strategy) {
-      console.log(`  - ${name}: ${strategy.description}`);
-    }
-  }
+  if (isAutoMode) {
+    // AUTO-SCAN MODE — runs continuously during market hours
+    console.log('\n🤖 Auto-Scan Mode Enabled');
+    console.log('This will scan your watchlist every 30 minutes during market hours.');
+    console.log('Press Ctrl+C to stop.\n');
 
-  // Demo: Analyze a symbol
-  const symbol = 'RELIANCE';
-  console.log(`\n📈 Analyzing ${symbol}...`);
+    const autoTrader = new AutoTrader();
 
-  try {
-    // Get instrument token for RELIANCE (this would typically come from instruments list)
+    // Parse watchlist
+    const symbols = config.WATCHLIST.split(',').map(s => s.trim()).filter(Boolean);
     const instruments = await kiteClient.getInstruments('NSE');
-    const reliance = instruments.find((i) => i.tradingsymbol === 'RELIANCE');
 
-    if (!reliance) {
-      console.log(`Instrument ${symbol} not found`);
+    for (const symbol of symbols) {
+      const instrument = instruments.find((i: any) => i.tradingsymbol === symbol);
+      if (instrument) {
+        autoTrader.addSymbol(symbol, instrument.instrument_token);
+      } else {
+        console.warn(`⚠️  Symbol "${symbol}" not found in NSE instruments`);
+      }
+    }
+
+    if ((autoTrader as any)['watchlist'].length === 0) {
+      console.error('❌ No valid symbols in watchlist. Check WATCHLIST in .env');
       return;
     }
 
-    console.log(`Found instrument: ${reliance.tradingsymbol} (token: ${reliance.instrument_token})`);
+    await autoTrader.start();
 
-    // Get historical candles
-    const candles = await kiteClient.getHistoricalCandles(
-      reliance.instrument_token,
-      config.HISTORICAL_DAYS,
-      config.TIMEFRAME
-    );
+    // Keep running
+    process.on('SIGINT', () => {
+      console.log('\n🛑 Stopping auto-trader...');
+      autoTrader.stop();
+      process.exit(0);
+    });
 
-    console.log(`Retrieved ${candles.length} candles`);
-
-    // Test each strategy
+  } else {
+    // ONE-TIME ANALYSIS MODE
+    // List available strategies
+    console.log('\n📊 Available Strategies:');
     for (const name of listStrategies()) {
       const strategy = getStrategy(name);
-      if (!strategy) continue;
-
-      const signal = await strategy.analyze(candles);
-      console.log(`\n  ${name}:`);
-      console.log(`    Action: ${signal.action.toUpperCase()}`);
-      console.log(`    Strength: ${(signal.strength * 100).toFixed(0)}%`);
-      console.log(`    Reason: ${signal.reason}`);
-      console.log(`    Indicators:`, signal.indicators);
-
-      // Run backtest
-      const backtest = strategy.backtest(candles);
-      console.log(`    Backtest: ${backtest.totalTrades} trades, ${backtest.winRate.toFixed(1)}% win rate, ${backtest.totalPnlPct.toFixed(2)}% return, ${backtest.maxDrawdownPct.toFixed(2)}% max DD`);
+      if (strategy) {
+        console.log(`  - ${name}: ${strategy.description}`);
+      }
     }
 
-    // Paper trading demo
-    console.log('\n📝 Paper Trading Demo:');
-    const paperEngine = new PaperTradingEngine(getStrategy('ma-crossover')!);
-    await paperEngine.initialize();
+    // Demo: Analyze RELIANCE
+    const symbol = 'RELIANCE';
+    console.log(`\n📈 Analyzing ${symbol}...`);
 
-    // Simulate a trade
-    const signal = await paperEngine.analyzeSymbol('RELIANCE', reliance.instrument_token);
-    console.log(`Signal: ${signal.action} (${(signal.strength * 100).toFixed(0)}%)`);
+    try {
+      const instruments = await kiteClient.getInstruments('NSE');
+      const reliance = instruments.find((i: any) => i.tradingsymbol === 'RELIANCE');
 
-    if (signal.action === 'buy') {
-      await paperEngine.openPosition('RELIANCE', 'long', 10, candles[candles.length - 1].close);
+      if (!reliance) {
+        console.log(`Instrument ${symbol} not found`);
+        return;
+      }
+
+      console.log(`Found instrument: ${reliance.tradingsymbol} (token: ${reliance.instrument_token})`);
+
+      const candles = await kiteClient.getHistoricalCandles(
+        reliance.instrument_token,
+        config.HISTORICAL_DAYS,
+        config.TIMEFRAME
+      );
+
+      console.log(`Retrieved ${candles.length} candles`);
+
+      // Test each strategy
+      for (const name of listStrategies()) {
+        const strategy = getStrategy(name);
+        if (!strategy) continue;
+
+        const signal = await strategy.analyze(candles);
+        console.log(`\n  ${name}:`);
+        console.log(`    Action: ${signal.action.toUpperCase()}`);
+        console.log(`    Strength: ${(signal.strength * 100).toFixed(0)}%`);
+        console.log(`    Reason: ${signal.reason}`);
+        console.log(`    Indicators:`, signal.indicators);
+
+        const backtest = strategy.backtest(candles);
+        console.log(`    Backtest: ${backtest.totalTrades} trades, ${backtest.winRate.toFixed(1)}% win rate, ${backtest.totalPnlPct.toFixed(2)}% return, ${backtest.maxDrawdownPct.toFixed(2)}% max DD`);
+      }
+
+    } catch (error) {
+      console.error('Error:', error);
     }
-
-    console.log('\nRisk Metrics:', paperEngine.getRiskMetrics());
-    console.log('Positions:', paperEngine.getPositions());
-
-  } catch (error) {
-    console.error('Error:', error);
   }
 }
 
