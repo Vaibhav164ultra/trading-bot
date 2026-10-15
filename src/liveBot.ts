@@ -1,13 +1,12 @@
 /**
- * Live trading bot - real-time monitoring and execution
- * Connects to Kite WebSocket, monitors positions, executes trades
+ * Live trading bot - Alert Only Mode
+ * Sends detailed, AI-like market alerts every 30 seconds during market hours
+ * No trading execution - monitoring and analysis only
  */
 
 import { KiteClient } from './kiteClient.js';
 import { KiteWebSocket } from './websocketClient.js';
-import { LiveOrderExecutor } from './liveOrderExecutor.js';
 import { TelegramNotifier } from './telegram.js';
-import { TradingLogger } from './logger.js';
 import { getStrategy, listStrategies } from './strategies.js';
 import { getConfig } from './config.js';
 import type { Candle, StrategySignal, Ticker } from './types.js';
@@ -15,56 +14,95 @@ import type { Candle, StrategySignal, Ticker } from './types.js';
 const MARKET_OPEN = { hour: 9, minute: 15 };
 const MARKET_CLOSE = { hour: 15, minute: 30 };
 const STRONG_SIGNAL_THRESHOLD = 0.55;
-const POSITION_CHECK_INTERVAL = 10000; // 10 seconds
-const SUMMARY_INTERVAL = 60000; // 1 minute
-const SIGNAL_COOLDOWN = 300000; // 5 minutes between signals per symbol
+const ALERT_INTERVAL = 30000; // 30 seconds
+const SUMMARY_INTERVAL = 90000; // 90 seconds for detailed summary
+const SIGNAL_COOLDOWN = 60000; // 1 minute cooldown per symbol per strategy
 
 interface SymbolState {
   symbol: string;
   token: number;
   candles: Candle[];
   lastSignalTime: Record<string, number>;
+  currentPrice: number;
 }
 
 interface BotStats {
   scansCompleted: number;
   signalsFired: number;
-  ordersPlaced: number;
-  ordersFailed: number;
+  alertsSent: number;
   errors: number;
   startedAt: Date;
 }
+
+// AI-like message variations for natural responses
+const ALERT_VARIATIONS = {
+  bullish: [
+    "Looks like {symbol} is showing some bullish momentum right now. The {strategy} strategy is picking up strength at {price}.",
+    "Interesting move on {symbol} — we're seeing a {strategy} setup forming at ₹{price}. The technicals are leaning positive.",
+    "{symbol} is catching my attention with a {strategy} signal. Price action at ₹{price} suggests potential upside.",
+    "{symbol} is picking up — {strategy} indicator is active around ₹{price}. Worth watching closely.",
+  ],
+  bearish: [
+    "Seeing some weakness in {symbol} here. The {strategy} pattern is flashing bearish at ₹{price}.",
+    "{symbol} might be heading lower — {strategy} is showing a sell signal near ₹{price}.",
+    "Caution on {symbol}: {strategy} indicates bearish pressure building at ₹{price}.",
+    "Downward pressure detected on {symbol}. The {strategy} setup at ₹{price} suggests sellers are in control.",
+  ],
+  strong_buy: [
+    "Strong BUY signal on {symbol}! {strategy} is firing with high conviction at ₹{price}. This one's worth watching closely.",
+    "{symbol} is lighting up — {strategy} shows a powerful buy setup right at ₹{price}.",
+    "High-confidence buy alert: {symbol} with {strategy} at ₹{price}. The indicators are aligned here.",
+    "🔥 {symbol} just triggered a strong {strategy} buy signal at ₹{price}. This is a notable setup.",
+  ],
+  strong_sell: [
+    "Strong SELL signal on {symbol}! {strategy} is firing with conviction at ₹{price}. Consider taking profits or avoiding.",
+    "{symbol} is showing serious bearish pressure — {strategy} at ₹{price} suggests downside ahead.",
+    "🔴 Heavy sell pressure on {symbol}. {strategy} confirms bearish momentum at ₹{price}.",
+    "Significant sell signal: {symbol} with {strategy} firing hard at ₹{price}. Market sentiment shifting.",
+  ],
+  neutral: [
+    "{symbol} is sitting in neutral territory at ₹{price}. No clear directional bias from {strategy} right now.",
+    "Consolidation phase on {symbol} — {strategy} shows nothing actionable at ₹{price}.",
+    "{symbol} at ₹{price}: {strategy} is flat. Market's taking a breather here.",
+  ],
+  market_open: [
+    "Market just opened! Let me get my bearings on all {symbol_count} stocks. First scan coming up...",
+    "Good morning! Market's open and I'm scanning through the watchlist. Let me check what's moving.",
+    "9:15 AM — markets are live. Running my first pass across all symbols now.",
+  ],
+  midday: [
+    "Midday check-in. Let me see what's happened since we started — scanning the watchlist now.",
+    "Halfway through the session. Running through my analysis on all {symbol_count} stocks.",
+    "Lunchtime update — checking in on {symbol_count} stocks to see what the market's doing.",
+  ],
+};
 
 export class LiveBot {
   private config = getConfig();
   private kiteClient: KiteClient;
   private webSocket: KiteWebSocket;
-  private executor: LiveOrderExecutor;
   private telegram: TelegramNotifier;
   private watchlist: SymbolState[] = [];
   private isRunning = false;
   private stats: BotStats = {
     scansCompleted: 0,
     signalsFired: 0,
-    ordersPlaced: 0,
-    ordersFailed: 0,
+    alertsSent: 0,
     errors: 0,
     startedAt: new Date(),
   };
-  private positionCheckTimer: NodeJS.Timeout | null = null;
-  private summaryTimer: NodeJS.Timeout | null = null;
   private pollingTimer: NodeJS.Timeout | null = null;
+  private summaryTimer: NodeJS.Timeout | null = null;
+  private messageIndex = 0;
+  private lastAlertKey = '';
+  private lastSummaryTime = 0;
 
   constructor() {
     this.kiteClient = new KiteClient(this.config.KITE_ACCESS_TOKEN);
     this.webSocket = new KiteWebSocket();
-    this.executor = new LiveOrderExecutor();
     this.telegram = new TelegramNotifier();
   }
 
-  /**
-   * Add a symbol to the watchlist
-   */
   async addSymbol(symbol: string, token: number): Promise<void> {
     const candles = await this.kiteClient.getHistoricalCandles(
       token,
@@ -77,16 +115,13 @@ export class LiveBot {
       token,
       candles,
       lastSignalTime: {},
+      currentPrice: candles.length > 0 ? candles[candles.length - 1].close : 0,
     });
 
     console.log(`📌 Added ${symbol} (token: ${token}, ${candles.length} historical candles)`);
   }
 
-  /**
-   * Initialize the bot
-   */
   async initialize(): Promise<void> {
-    // Fetch initial data for all symbols
     const instruments = await this.kiteClient.getInstruments('NSE');
     const symbols = this.config.WATCHLIST.split(',').map(s => s.trim()).filter(Boolean);
 
@@ -103,25 +138,13 @@ export class LiveBot {
       throw new Error('No valid symbols in watchlist. Check WATCHLIST in .env');
     }
 
-    // Set starting equity
-    try {
-      const margins = await this.kiteClient.getMargins();
-      const equity = margins.net?.available?.cash ?? 100000;
-      this.executor.setDayStartEquity(equity);
-      console.log(`💰 Starting equity: ₹${equity.toLocaleString()}`);
-    } catch {}
-
-    // Subscribe to WebSocket
     const tokens = this.watchlist.map(s => s.token);
     this.webSocket.subscribe(tokens);
     this.webSocket.onTick(this.handleTick.bind(this));
 
-    console.log(`\n✅ Initialized ${this.watchlist.length} symbols for live trading\n`);
+    console.log(`\n✅ Initialized ${this.watchlist.length} symbols for live monitoring\n`);
   }
 
-  /**
-   * Start the live bot
-   */
   async start(): Promise<void> {
     if (this.isRunning) {
       console.log('⚠️  Bot is already running');
@@ -132,23 +155,22 @@ export class LiveBot {
     this.stats.startedAt = new Date();
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🤖 LIVE TRADING BOT STARTED');
+    console.log('🤖 ALERT-ONLY BOT STARTED');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log(`📅 Trading days: Mon-Fri`);
     console.log(`🕐 Market hours: 9:15 AM - 3:30 PM IST`);
-    console.log(`📊 Watchlist: ${this.watchlist.map(s => s.symbol).join(', ')}`);
+    console.log(`📊 Watchlist: ${this.watchlist.length} symbols`);
     console.log(`🔌 WebSocket: ${this.webSocket.getConnectionState()}`);
     console.log(`📱 Telegram: ${this.telegram.isConnected ? '✅ Connected' : '❌ Not configured'}`);
+    console.log(`⚠️  Mode: ALERTS ONLY (no trading execution)`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-    // Send startup message
     if (this.telegram.isConnected) {
       await this.telegram.send(
-        `🤖 <b>Live Bot Started</b>\nMode: <b>LIVE TRADING</b>\nWatchlist: ${this.watchlist.map(s => s.symbol).join(', ')}`
+        `🤖 <b>Alert-Only Bot Started</b>\n\nMode: <b>ALERTS ONLY</b>\nWatchlist: ${this.watchlist.map(s => s.symbol).join(', ')}\n\nI'll send you detailed market updates every 30 seconds during trading hours. No trades will be placed.`
       );
     }
 
-    // Connect WebSocket (with timeout - might fail in some environments)
     try {
       this.webSocket.connect();
       console.log('🔌 WebSocket initiated');
@@ -157,54 +179,42 @@ export class LiveBot {
       console.log('   Bot will continue with polling mode');
     }
 
-    // Start polling as fallback (every 30 seconds)
     console.log('📡 Starting polling mode (30s intervals)...');
-    this.pollingTimer = setInterval(() => this.pollMarketData(), 30000);
-
-    // Start periodic tasks
-    this.positionCheckTimer = setInterval(() => this.checkPositions(), POSITION_CHECK_INTERVAL);
+    this.pollingTimer = setInterval(() => this.pollMarketData(), ALERT_INTERVAL);
     this.summaryTimer = setInterval(() => this.sendSummary(), SUMMARY_INTERVAL);
 
-    // Handle shutdown
     process.on('SIGINT', () => this.shutdown());
     process.on('SIGTERM', () => this.shutdown());
 
-    console.log('✅ Bot is running. Monitoring markets...\n');
+    console.log('✅ Bot is running. Sending alerts during market hours...\n');
   }
 
-  /**
-   * Handle incoming ticks from WebSocket
-   */
   private handleTick(ticker: Ticker): void {
     const state = this.watchlist.find(s => s.token === ticker.instrumentToken);
     if (!state) return;
 
-    // Update last price in state
+    state.currentPrice = ticker.lastPrice;
+
     const lastCandle = state.candles[state.candles.length - 1];
     if (lastCandle && Math.abs(lastCandle.close - ticker.lastPrice) > 0.01) {
-      // Update the last candle's close price (simulate real-time update)
       lastCandle.close = ticker.lastPrice;
       lastCandle.high = Math.max(lastCandle.high, ticker.lastPrice);
       lastCandle.low = Math.min(lastCandle.low, ticker.lastPrice);
       lastCandle.volume = ticker.volume;
     }
 
-    // Check for signals if we have enough data
     if (state.candles.length >= 50) {
       this.analyzeSymbol(state);
     }
   }
 
-  /**
-   * Analyze a symbol and check for trading signals
-   */
   private async analyzeSymbol(state: SymbolState): Promise<void> {
-    const now = Date.now();
-    const currentPrice = state.candles[state.candles.length - 1].close;
+    if (!this.isMarketHours()) return;
 
-    // Run all strategies
+    const now = Date.now();
+    const currentPrice = state.currentPrice || state.candles[state.candles.length - 1].close;
+
     for (const name of listStrategies()) {
-      // Skip if cooldown active
       const lastSignal = state.lastSignalTime[name] ?? 0;
       if (now - lastSignal < SIGNAL_COOLDOWN) continue;
 
@@ -214,25 +224,13 @@ export class LiveBot {
       try {
         const signal = await strategy.analyze(state.candles);
 
-        if (signal.action === 'buy' && signal.strength >= STRONG_SIGNAL_THRESHOLD) {
+        if (signal.strength >= STRONG_SIGNAL_THRESHOLD) {
           this.stats.signalsFired++;
           state.lastSignalTime[name] = now;
 
-          console.log(`🔔 Signal: ${state.symbol} - ${name} - BUY (strength: ${(signal.strength * 100).toFixed(0)}%)`);
+          console.log(`🔔 Signal: ${state.symbol} - ${name} - ${signal.action.toUpperCase()} (strength: ${(signal.strength * 100).toFixed(0)}%)`);
 
-          // Execute trade
-          const order = await this.executor.placeBuyOrder(
-            state.symbol,
-            state.token,
-            signal,
-            currentPrice
-          );
-
-          if (order) {
-            this.stats.ordersPlaced++;
-          } else {
-            this.stats.ordersFailed++;
-          }
+          await this.sendAIAlert(state.symbol, name, signal, currentPrice);
         }
       } catch (error) {
         console.error(`Error analyzing ${state.symbol}:`, error);
@@ -241,23 +239,164 @@ export class LiveBot {
     }
   }
 
-  /**
-   * Periodically check and update positions
-   */
-  private async checkPositions(): Promise<void> {
-    if (!this.isRunning) return;
+  private async sendAIAlert(symbol: string, strategy: string, signal: StrategySignal, price: number): Promise<void> {
+    const strength = Math.round(signal.strength * 100);
+    const action = signal.action;
 
-    try {
-      await this.executor.refreshPositions();
-      await this.executor.checkExitConditions();
-    } catch (error) {
-      console.error('Error checking positions:', error);
+    let category: string;
+    if (action === 'buy' && strength >= 70) {
+      category = 'strong_buy';
+    } else if (action === 'buy') {
+      category = 'bullish';
+    } else if (action === 'sell' && strength >= 70) {
+      category = 'strong_sell';
+    } else if (action === 'sell') {
+      category = 'bearish';
+    } else {
+      category = 'neutral';
     }
+
+    const messages = ALERT_VARIATIONS[category as keyof typeof ALERT_VARIATIONS];
+    if (!messages || messages.length === 0) return;
+
+    let template = messages[this.messageIndex % messages.length];
+    this.messageIndex++;
+
+    let attempts = 0;
+    while (template === this.lastAlertKey && attempts < messages.length) {
+      template = messages[this.messageIndex % messages.length];
+      this.messageIndex++;
+      attempts++;
+    }
+    this.lastAlertKey = template;
+
+    let message = template
+      .replace(/{symbol}/g, symbol)
+      .replace(/{strategy}/g, strategy)
+      .replace(/{price}/g, price.toFixed(2))
+      .replace(/{strength}/g, strength.toString())
+      .replace(/{symbol_count}/g, this.watchlist.length.toString());
+
+    message += `\n\n💡 ${signal.reason}`;
+    const time = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+    message += `\n⏰ ${time}`;
+
+    await this.telegram.send(message.trim());
+    this.stats.alertsSent++;
   }
 
-  /**
-   * Poll market data as fallback when WebSocket fails
-   */
+  private isMarketHours(): boolean {
+    const now = new Date();
+    const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const hour = ist.getHours();
+    const minute = ist.getMinutes();
+    const totalMin = hour * 60 + minute;
+    return totalMin >= (9 * 60 + 15) && totalMin <= (15 * 60 + 30);
+  }
+
+  private async sendSummary(): Promise<void> {
+    if (!this.isRunning) return;
+    if (!this.isMarketHours()) return;
+
+    this.stats.scansCompleted++;
+
+    const now = Date.now();
+    if (now - this.lastSummaryTime < SUMMARY_INTERVAL) return;
+    this.lastSummaryTime = now;
+
+    const signals: Array<{ symbol: string; strategy: string; signal: StrategySignal; price: number }> = [];
+
+    for (const state of this.watchlist) {
+      if (state.candles.length < 50) continue;
+
+      for (const name of listStrategies()) {
+        const strategy = getStrategy(name);
+        if (!strategy) continue;
+
+        try {
+          const signal = await strategy.analyze(state.candles);
+          if (signal.strength >= STRONG_SIGNAL_THRESHOLD) {
+            signals.push({
+              symbol: state.symbol,
+              strategy: name,
+              signal,
+              price: state.currentPrice || state.candles[state.candles.length - 1].close,
+            });
+          }
+        } catch {}
+      }
+    }
+
+    const summary = this.generateMarketSummary(signals);
+    await this.telegram.send(summary);
+  }
+
+  private generateMarketSummary(signals: Array<{ symbol: string; strategy: string; signal: StrategySignal; price: number }>): string {
+    const now = new Date();
+    const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const timeStr = ist.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+    const totalMin = ist.getHours() * 60 + ist.getMinutes();
+
+    let openingNote = '';
+    if (totalMin >= 9 * 60 + 15 && totalMin < 9 * 60 + 45) {
+      openingNote = "Just started — scanning the market for early opportunities...\n\n";
+    } else if (totalMin >= 12 * 60 && totalMin < 13 * 60) {
+      openingNote = "Midday check-in — reviewing what's happening across the watchlist:\n\n";
+    } else if (totalMin >= 15 * 60 && totalMin <= 15 * 60 + 30) {
+      openingNote = "Market's wrapping up — here's how things are shaping up:\n\n";
+    }
+
+    if (signals.length === 0) {
+      return `📊 <b>Market Status</b> — ${timeStr}\n\n${openingNote}No strong signals detected right now. The market is in a consolidation phase across most of the watchlist. I'll keep monitoring and alert you when something interesting comes up.\n\n📈 ${this.watchlist.length} stocks being tracked`;
+    }
+
+    const buys = signals.filter(s => s.signal.action === 'buy');
+    const sells = signals.filter(s => s.signal.action === 'sell');
+
+    let message = `📊 <b>Market Update</b> — ${timeStr}\n\n${openingNote}`;
+
+    if (buys.length > 0) {
+      message += `<b>🟢 Buy Signals (${buys.length}):</b>\n`;
+      for (const s of buys.slice(0, 5)) {
+        const strength = Math.round(s.signal.strength * 100);
+        message += `• ${s.symbol} — ${s.strategy} @ ₹${s.price.toFixed(0)} (${strength}% strength)\n`;
+      }
+      if (buys.length > 5) {
+        message += `• ...and ${buys.length - 5} more\n`;
+      }
+      message += '\n';
+    }
+
+    if (sells.length > 0) {
+      message += `<b>🔴 Sell Signals (${sells.length}):</b>\n`;
+      for (const s of sells.slice(0, 5)) {
+        const strength = Math.round(s.signal.strength * 100);
+        message += `• ${s.symbol} — ${s.strategy} @ ₹${s.price.toFixed(0)} (${strength}% strength)\n`;
+      }
+      if (sells.length > 5) {
+        message += `• ...and ${sells.length - 5} more\n`;
+      }
+      message += '\n';
+    }
+
+    const totalSignals = signals.length;
+    let sentiment = '';
+    if (totalSignals <= 2) {
+      sentiment = 'Low activity — market is quiet right now.';
+    } else if (totalSignals <= 5) {
+      sentiment = 'Moderate movement — a few setups are forming.';
+    } else if (totalSignals <= 10) {
+      sentiment = 'Active session — several signals detected across the watchlist.';
+    } else {
+      sentiment = 'High volatility — lots of action happening across multiple stocks!';
+    }
+
+    message += `<i>${sentiment}</i>\n\n`;
+    message += `📡 Scanning ${this.watchlist.length} stocks | ${this.stats.scansCompleted} scans completed`;
+
+    return message.trim();
+  }
+
   private async pollMarketData(): Promise<void> {
     if (!this.isRunning) return;
 
@@ -274,16 +413,15 @@ export class LiveBot {
         if (candles.length > 0) {
           const latestCandle = candles[0];
 
-          // Update the state's candle data
           if (state.candles.length === 0 ||
               Math.abs(state.candles[state.candles.length - 1].close - latestCandle.close) > 0.01) {
             state.candles.push(latestCandle);
             if (state.candles.length > 500) {
               state.candles = state.candles.slice(-500);
             }
+            state.currentPrice = latestCandle.close;
           }
 
-          // Analyze if we have enough data
           if (state.candles.length >= 50) {
             await this.analyzeSymbol(state);
           }
@@ -295,79 +433,22 @@ export class LiveBot {
     }
   }
 
-  /**
-   * Send periodic summary to Telegram
-   */
-  private async sendSummary(): Promise<void> {
-    if (!this.isRunning) return;
-
-    const positions = this.executor.getPositions();
-    const metrics = this.executor.getRiskMetrics();
-    const uptime = this.formatUptime();
-
-    // Only send if there are positions or it's market hours
-    const now = new Date();
-    const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const hour = ist.getHours();
-    const minute = ist.getMinutes();
-    const totalMin = hour * 60 + minute;
-    const isMarketHours = totalMin >= (9 * 60 + 15) && totalMin <= (15 * 60 + 30);
-
-    if (positions.length === 0 && !isMarketHours) return;
-
-    let message = `📊 <b>Market Update</b>\n`;
-    message += `Time: ${ist.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}\n\n`;
-
-    if (positions.length > 0) {
-      message += `<b>Positions:</b>\n`;
-      for (const pos of positions) {
-        const pnlEmoji = pos.unrealizedPnl >= 0 ? '🟢' : '🔴';
-        message += `${pnlEmoji} ${pos.symbol}: ${pos.side} ×${pos.quantity}\n`;
-        message += `  Entry: ₹${pos.entryPrice.toFixed(0)} → Current: ₹${pos.currentPrice.toFixed(0)}\n`;
-        message += `  P&L: ${pnlEmoji}₹${pos.unrealizedPnl.toFixed(0)} (${pos.unrealizedPct.toFixed(2)}%)\n`;
-        message += `  SL: ₹${pos.stopLoss.toFixed(0)} | Target: ₹${pos.target.toFixed(0)}\n`;
-      }
-      message += '\n';
-    }
-
-    message += `<b>Risk:</b> Daily P&L: ₹${metrics.dailyPnl.toFixed(0)} | Positions: ${metrics.openPositions}`;
-
-    await this.telegram.send(message.trim());
-  }
-
-  /**
-   * Format uptime
-   */
-  private formatUptime(): string {
-    const secs = Math.floor((Date.now() - this.stats.startedAt.getTime()) / 1000);
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    return `${h}h ${m}m`;
-  }
-
-  /**
-   * Stop the bot
-   */
   stop(): void {
     this.isRunning = false;
 
-    if (this.positionCheckTimer) {
-      clearInterval(this.positionCheckTimer);
-      this.positionCheckTimer = null;
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = null;
     }
     if (this.summaryTimer) {
       clearInterval(this.summaryTimer);
       this.summaryTimer = null;
     }
-    if (this.pollingTimer) {
-      clearInterval(this.pollingTimer);
-      this.pollingTimer = null;
-    }
 
     this.webSocket.disconnect();
 
     console.log('🛑 Live bot stopped');
-    this.telegram.send('🛑 <b>Live Bot Stopped</b>').catch(() => {});
+    this.telegram.send('🛑 <b>Alert Bot Stopped</b>').catch(() => {});
   }
 
   private async shutdown(): Promise<void> {
@@ -376,7 +457,6 @@ export class LiveBot {
     process.exit(0);
   }
 
-  // Getters for monitoring
   get isRunningState(): boolean {
     return this.isRunning;
   }

@@ -152,21 +152,10 @@ ${pnlText}
   }
 
   /**
-   * Send order execution confirmation
+   * Send order alert (alias for sendOrderConfirm)
    */
   async sendOrderAlert(order: ExecutedOrder, action: 'OPEN' | 'CLOSE', pnl?: number): Promise<void> {
-    const emoji = order.side === 'BUY' ? '🟢' : '🔴';
-    const pnlText = pnl !== undefined ? `\nP&L: ${pnl >= 0 ? '✅' : '❌'} ₹${pnl.toFixed(2)}` : '';
-    const message = `
-${emoji} <b>Order ${action}: ${order.symbol}</b>
-Side: <b>${order.side}</b> | Qty: <code>${order.quantity}</code>
-Price: <b>₹${order.entryPrice.toFixed(2)}</b>
-Stop Loss: <b>₹${order.stopLoss.toFixed(2)}</b> | Target: <b>₹${order.target.toFixed(2)}</b>
-${pnlText}
-
-⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
-`.trim();
-    await this.send(message);
+    return this.sendOrderConfirm(order, action, pnl);
   }
 
   /**

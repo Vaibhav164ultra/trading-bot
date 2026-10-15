@@ -11,7 +11,7 @@ const envSchema = z.object({
   KITE_API_SECRET: z.string().min(1, 'KITE_API_SECRET is required'),
   KITE_ACCESS_TOKEN: z.string().optional(), // Set after login flow
 
-  // Trading parameters
+  // Trading parameters (kept for compatibility but not used in alert mode)
   TRADING_MODE: z.enum(['paper', 'live']).default('paper'),
   DEFAULT_QUANTITY: z.coerce.number().default(1),
   MAX_POSITIONS: z.coerce.number().default(5),
@@ -25,7 +25,7 @@ const envSchema = z.object({
   // Data & Analysis
   DATA_DIR: z.string().default('./data'),
   HISTORICAL_DAYS: z.coerce.number().default(365),
-  TIMEFRAME: z.enum(['minute', '5minute', '15minute', '30minute', '60minute', 'day']).default('day'),
+  TIMEFRAME: z.enum(['minute', '5minute', '15minute', '30minute', '60minute', 'day']).default('5minute'),
 
   // Server
   PORT: z.coerce.number().default(3000),
@@ -40,7 +40,7 @@ const envSchema = z.object({
   TELEGRAM_CHAT_ID: z.string().optional(),
 
   // Watchlist (comma-separated symbols like "RELIANCE,INFY,TCS")
-  WATCHLIST: z.string().default('RELIANCE'),
+  WATCHLIST: z.string().default('RELIANCE,INFY,TCS,HDFCBANK,ICICIBANK,KOTAKBANK,SBIN,AXISBANK,ADANIENT,ADANIPORTS,MARUTI,TATASTEEL,HCLTECH,WIPRO,BHARTIARTL,ITC,LICI,POWERGRID,NTPC,ONGC,JSWSTEEL'),
 
   // Scan config
   SCAN_INTERVAL_MIN: z.coerce.number().default(10), // minutes between scans

@@ -1,22 +1,16 @@
 /**
- * Express HTTP API server for monitoring the live trading bot
+ * Express HTTP API server for monitoring the alert-only trading bot
  */
 
 import { LiveBot } from './liveBot.js';
-import { LiveOrderExecutor } from './liveOrderExecutor.js';
 import { getConfig } from './config.js';
 import http from 'http';
 
 let bot: LiveBot | null = null;
-let executor: LiveOrderExecutor | null = null;
 
-// Export functions to set bot and executor
+// Export functions to set bot
 export function setBot(b: LiveBot): void {
   bot = b;
-}
-
-export function setExecutor(e: LiveOrderExecutor): void {
-  executor = e;
 }
 
 export function startServer(port: number = 3000): http.Server {
@@ -47,6 +41,8 @@ export function startServer(port: number = 3000): http.Server {
           status: botState ? 'running' : 'stopped',
           uptime: uptime,
           symbols: bot?.watchlistState.length ?? 0,
+          alertsSent: bot?.botStats.alertsSent ?? 0,
+          signalsFired: bot?.botStats.signalsFired ?? 0,
           timestamp: new Date().toISOString(),
         }));
         return;
@@ -64,21 +60,20 @@ export function startServer(port: number = 3000): http.Server {
         return;
       }
 
-      if (path === '/api/positions') {
+      if (path === '/api/alerts') {
+        // Recent alerts summary
         res.writeHead(200);
-        res.end(JSON.stringify(executor?.getPositions() ?? []));
-        return;
-      }
-
-      if (path === '/api/risk') {
-        res.writeHead(200);
-        res.end(JSON.stringify(executor?.getRiskMetrics() ?? {}));
+        res.end(JSON.stringify({
+          totalAlertsSent: bot?.botStats.alertsSent ?? 0,
+          totalSignals: bot?.botStats.signalsFired ?? 0,
+          mode: 'ALERT_ONLY',
+        }));
         return;
       }
 
       // Not found
       res.writeHead(404);
-      res.end(JSON.stringify({ error: 'Not found' }));
+      res.end(JSON.stringify({ error: 'Not found. Try /health or /api/status' }));
     } catch (error: any) {
       console.error('Server error:', error.message);
       res.writeHead(500);
@@ -93,4 +88,3 @@ export function startServer(port: number = 3000): http.Server {
 
   return server;
 }
-
