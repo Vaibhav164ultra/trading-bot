@@ -2,25 +2,26 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Copy all package files
 COPY package*.json ./
-RUN npm ci --omit=dev
 
-# Build TypeScript
+# Install all dependencies (including dev deps for build)
+RUN npm install
+
+# Copy source code
 COPY tsconfig.json ./
 COPY src/ ./src/
+
+# Build TypeScript
 RUN npm run build
 
-# Production dependencies only
-RUN npm ci --omit=dev --ignore-scripts
+# Remove dev dependencies to reduce image size
+RUN npm prune --production
 
 # Create logs directory
 RUN mkdir -p logs
 
-# Copy PM2 config
-COPY ecosystem.config.js ./
-
 EXPOSE 3000
 
-# Start with Node directly (no PM2 needed on cloud)
+# Start the bot
 CMD ["node", "dist/live.js"]
