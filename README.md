@@ -1,286 +1,249 @@
-# Zerodha Live Trading Bot v2.0
+# Zerodha Live Trading Bot
 
-AI-powered automated trading system with real-time WebSocket monitoring, live order execution, and Telegram alerts.
+An automated trading system for Indian stock markets using Zerodha Kite Connect API with real-time WebSocket monitoring, strategy-based signal detection, and Telegram notifications.
 
-## What's New in v2.0
+## 🚀 Quick Start
 
-- **Live Trading Mode** - Real-time market monitoring with WebSocket
-- **Automatic Order Execution** - Places trades when signals trigger
-- **Risk Management** - Stop loss, target, position limits, daily loss limits
-- **Position Tracking** - Real-time P&L monitoring
-- **Telegram Alerts** - Instant notifications for orders and summaries
-- **Cloud Deployment Ready** - Docker + PM2 support
+### Prerequisites
+- Node.js 20+
+- Zerodha Kite Connect API credentials
+- Telegram bot token and chat ID
 
-## Architecture
-
-```
-src/
-├── index.ts          # Main entry (analysis + scan modes)
-├── live.ts           # Live trading entry point
-├── liveBot.ts        # Core live bot logic
-├── websocketClient.ts # Kite WebSocket connection
-├── liveOrderExecutor.ts # Order placement & management
-├── autoTrader.ts     # Periodic scan mode
-├── strategies.ts     # 7 trading strategies
-├── indicators.ts     # Technical indicators
-├── kiteClient.ts     # Kite API wrapper
-├── telegram.ts       # Telegram notifications
-├── logger.ts         # History logging
-└── config.ts         # Configuration
-```
-
-## Quick Start
-
-### Local Development
-
+### Local Setup
 ```bash
+# Clone repository
+git clone https://github.com/Vaibhav164ultra/trading-bot.git
+cd trading-bot
+
 # Install dependencies
 npm install
 
 # Build TypeScript
 npm run build
 
-# Run live trading bot
+# Run in paper trading mode (safe testing)
 npm run live
-
-# Or run analysis mode
-npm run dev
-
-# Or run periodic scan mode
-npm run scan
 ```
 
-### Cloud Deployment
+### Cloud Deployment (Render)
+See [DEPLOY_GUIDE.md](./DEPLOY_GUIDE.md) for step-by-step instructions.
 
-#### Option 1: Render.com (Free Tier)
+---
 
-1. Push code to GitHub
-2. Go to https://render.com → New → Web Service
-3. Connect your repo
-4. Configure:
-   - Name: `zerodha-bot`
-   - Environment: `Node`
-   - Build: `npm run build`
-   - Start: `npm start`
-5. Add environment variables (see below)
-6. Deploy!
+## 📊 Features
 
-#### Option 2: Railway.app (Free Tier)
+| Feature | Description |
+|---------|-------------|
+| **Real-time Monitoring** | WebSocket connection to Kite for live price updates |
+| **7 Trading Strategies** | MA Crossover, RSI Reversion, MACD, Bollinger Bands, Conservative RSI, Tight BBands, Scalper |
+| **Automated Execution** | Places orders when signals trigger (paper/live mode) |
+| **Risk Management** | Stop loss, target, position limits, daily loss limits |
+| **Telegram Alerts** | Instant notifications for signals, orders, and summaries |
+| **History Logging** | All scans and trades saved to JSONL files |
+| **HTTP API** | Health checks and status endpoints for monitoring |
 
-1. Go to https://railway.app
-2. Sign up with GitHub
-3. Click "New Project" → "Deploy from GitHub"
-4. Select your repo
-5. Add environment variables
-6. Deploy automatically
+---
 
-#### Option 3: Docker (Any Cloud Provider)
+## ⚙️ Configuration
 
-```bash
-# Build Docker image
-docker build -t zerodha-bot .
+### Environment Variables
 
-# Run locally
-docker run -p 3000:3000 --env-file .env zerodha-bot
-
-# Or push to Docker Hub / ECR / GCR
-docker tag zerodha-bot yourusername/zerodha-bot:latest
-docker push yourusername/zerodha-bot:latest
-```
-
-## Environment Variables
-
-Create a `.env` file:
+Create a `.env` file in the project root:
 
 ```env
-# Kite Connect API Credentials
+# Kite Connect API (required)
 KITE_API_KEY=your_api_key_here
 KITE_API_SECRET=your_api_secret_here
 KITE_ACCESS_TOKEN=your_access_token_here
 
-# Trading Configuration
-TRADING_MODE=paper           # paper or live
+# Telegram (required for alerts)
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+
+# Trading Parameters
+TRADING_MODE=paper          # paper | live
 DEFAULT_QUANTITY=1
 MAX_POSITIONS=5
 STOP_LOSS_PCT=0.5
 TARGET_PCT=1.5
 MAX_DAILY_LOSS_PCT=2
 
-# Data & Analysis
+# Data Settings
 HISTORICAL_DAYS=365
-TIMEFRAME=5minute
+TIMEFRAME=5minute           # minute | 5minute | day
 
-# Telegram
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
-
-# Watchlist (comma-separated)
-WATCHLIST=RELIANCE,INFY,TCS,...
+# Watchlist (NSE symbols, comma-separated)
+WATCHLIST=RELIANCE,INFY,TCS,HDFCBANK,ICICIBANK,KOTAKBANK,SBIN,AXISBANK,ADANIENT,ADANIPORTS,MARUTI,TATASTEEL,HCLTECH,WIPRO,BHARTIARTL,ITC,LICI,POWERGRID,NTPC,ONGC,JSWSTEEL
 
 # Server
 PORT=3000
 ```
 
-## Trading Modes
+> **Security**: Never commit `.env` to GitHub. Use environment variables in your deployment platform.
 
-### 1. Live Trading Mode (`npm run live`)
-- Connects to Kite WebSocket for real-time data
-- Monitors all watchlist symbols every second
-- Automatically executes trades when signals trigger
-- Sends Telegram alerts for every order
-- Manages stop loss and target automatically
+---
 
-### 2. Periodic Scan Mode (`npm run scan`)
-- Scans watchlist every 10 minutes
-- Generates signals but doesn't execute
-- Good for testing and paper trading
+## 📈 Trading Strategies
 
-### 3. One-Time Analysis (`npm run dev`)
-- Single analysis run
-- Shows signals for all strategies
-- Runs backtests
+| Strategy | Logic | Best For |
+|----------|-------|----------|
+| **MA Crossover** | Fast MA crosses above/below slow MA | Trend following |
+| **RSI Mean Reversion** | Buy when RSI < 30, sell when RSI > 70 | Range-bound markets |
+| **MACD** | MACD line crosses signal line | Momentum detection |
+| **Bollinger Bands** | Price touches upper/lower bands | Volatility breakouts |
+| **Conservative RSI** | Only trade extreme RSI (< 20 or > 80) | Low-risk trading |
+| **Tight BBands** | Price near outer bands with squeeze | High volatility |
+| **Scalper** | Quick entries/exits with tight stops | Intraday scalping |
 
-## Strategies
+---
 
-| Strategy | Description |
-|----------|-------------|
-| MA Crossover | Buy when fast MA crosses above slow MA |
-| RSI Mean Reversion | Buy when RSI < 30, sell when RSI > 70 |
-| MACD | Buy on MACD bullish crossover |
-| Bollinger Bands | Buy at lower band, sell at upper band |
-| Conservative RSI | Only trade extreme RSI (< 20 or > 80) |
-| Tight BBands | Trade when price touches outer bands |
-| Scalper | Quick entries/exits with tight stops |
+## 🔧 Architecture
 
-## Risk Management
-
-- **Stop Loss**: 0.5% below entry (configurable)
-- **Target**: 1.5% above entry (configurable)
-- **Max Positions**: 5 simultaneous positions
-- **Daily Loss Limit**: 2% of starting equity
-- **Position Cooldown**: 5 minutes between trades per symbol
-
-## Monitoring
-
-### Telegram Alerts
-
-The bot sends real-time updates to your Telegram:
-- 🟢 Buy signal with strategy details
-- 🔴 Sell/close signal with P&L
-- 📊 Periodic summary with open positions
-- ❌ Order failures
-
-### Logs
-
-All trades and signals are logged to:
-- `logs/scan_YYYY-MM-DD.jsonl` - Scan results
-- `logs/signal_YYYY-MM-DD.jsonl` - Signal alerts
-- `logs/trade_YYYY-MM-DD.jsonl` - Order executions
-- `logs/daily_summary.json` - Daily summary
-
-### PM2 Logs (Cloud)
-
-```bash
-# View logs
-pm2 logs zerodha-bot
-
-# Check status
-pm2 status
-
-# Restart bot
-pm2 restart zerodha-bot
+```
+src/
+├── live.ts              # Entry point for production
+├── liveBot.ts           # Core bot logic (WebSocket + analysis)
+├── websocketClient.ts   # Kite WebSocket connection
+├── liveOrderExecutor.ts # Order placement & position management
+├── server.ts            # HTTP API for monitoring
+├── autoTrader.ts        # Periodic scan mode
+├── strategies.ts        # 7 trading strategies
+├── indicators.ts        # Technical indicators (RSI, MACD, BB, etc.)
+├── kiteClient.ts        # Kite API wrapper
+├── telegram.ts          # Telegram notifications
+├── logger.ts            # History logging
+├── config.ts            # Environment validation
+└── types.ts             # TypeScript interfaces
 ```
 
-## Deployment Checklist
+---
 
-### Before Deploying Live
+## 📡 HTTP API Endpoints
 
-1. ✅ Test with `TRADING_MODE=paper` first
-2. ✅ Verify all credentials in `.env`
-3. ✅ Test Telegram notifications
-4. ✅ Run backtests on all strategies
-5. ✅ Set appropriate position sizes
-6. ✅ Review risk parameters
-7. ✅ Monitor for first few hours
-8. ✅ Have kill switch ready (Ctrl+C or `pm2 stop`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check (for Render uptime monitoring) |
+| `/api/status` | GET | Bot status and watchlist |
+| `/api/positions` | GET | Open positions |
+| `/api/risk` | GET | Risk metrics |
 
-### Cloud Setup
-
-1. Push to GitHub
-2. Deploy to Render/Railway/Oracle Cloud
-3. Add all environment variables
-4. Verify bot starts successfully
-5. Check Telegram for startup message
-6. Monitor initial trades
-
-## Kite Access Token
-
-Your access token expires after ~24 hours. To regenerate:
-
-1. Visit: https://kite.zerodha.com/connect/login?api_key=YOUR_API_KEY&v=3
-2. Login with Zerodha credentials
-3. Copy the `request_token` from redirect URL
-4. Generate new access token:
-   ```bash
-   node -e "const {KiteConnect}=require('kiteconnect'); const k=new KiteConnect({api_key:'YOUR_API_KEY'}); (async()=>{const s=await k.generateSession('REQUEST_TOKEN','YOUR_API_SECRET'); console.log(s.access_token);})();"
-   ```
-5. Update `.env` with new token
-
-## Oracle Cloud Free Tier (Recommended)
-
-Oracle offers generous free resources:
-- 2 ARM cores
-- 24GB RAM
-- 200GB storage
-- Always free
-
-Setup:
-```bash
-# After creating VM
-sudo apt update && sudo apt install -y nodejs npm git
-git clone <your-repo>
-cd zerodha-trading-analysis-execution
-npm install
-npm run build
-npx pm2 start ecosystem.config.js
-npx pm2 save
-npx pm2 startup systemd
+### Example Health Check Response
+```json
+{
+  "status": "running",
+  "uptime": 3600,
+  "symbols": 21,
+  "timestamp": "2026-10-15T10:00:00.000Z"
+}
 ```
 
-## Troubleshooting
+---
 
-### WebSocket Not Connecting
-- Ensure `KITE_ACCESS_TOKEN` is valid
-- Check internet connection
-- Token may need refresh every 24h
+## 🚨 Risk Management
 
-### No Trades Executing
-- Check `TRADING_MODE=live` in `.env`
-- Verify watchlist symbols exist in NSE
-- Check signal strength threshold (default: 55%)
-- Review logs: `pm2 logs zerodha-bot`
+The bot enforces multiple safety controls:
 
-### Order Failures
-- Check margin availability
-- Verify symbol is in your watchlist
-- Check for cooldown period
-- Review Kite API error messages
+1. **Stop Loss**: 0.5% below entry price (configurable)
+2. **Target Profit**: 1.5% above entry price (configurable)
+3. **Max Positions**: 5 simultaneous positions (configurable)
+4. **Daily Loss Limit**: 2% of starting equity (configurable)
+5. **Symbol Cooldown**: 5 minutes between trades per symbol
+6. **Paper/Live Mode**: Always test in paper mode first
 
-### Telegram Not Sending
-- Verify `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
-- Test with: `curl "https://api.telegram.org/bot<TOKEN>/getMe"`
-- Check bot is not blocked
+---
 
-## Important Disclaimers
+## 📱 Telegram Alerts
 
-⚠️ **Trading involves risk of loss. This software is for educational purposes.**
+| Event | Message Format |
+|-------|----------------|
+| **Bot Start** | "🤖 Live Bot Started" with watchlist |
+| **Signal** | "🟢 BUY RELIANCE - MA Crossover" with strength % |
+| **Order Placed** | "📤 Order placed: BUY RELIANCE ×1 @ 2450" |
+| **Stop Loss Hit** | "🛑 STOP LOSS hit for RELIANCE" |
+| **Target Hit** | "🎯 TARGET hit for RELIANCE" |
+| **Position Closed** | "📤 Position closed: RELIANCE | P&L: ₹+150" |
+| **Daily Summary** | Position details, P&L, risk metrics every minute |
 
-- Always test with paper trading first
-- Never invest more than you can afford to lose
-- past performance does not guarantee future results
-- Consult a financial advisor before trading
-- You are responsible for your trading decisions
+---
 
-## License
+## 📝 Logs
+
+All activity is logged to the `logs/` directory:
+
+| File | Content |
+|------|---------|
+| `scan_YYYY-MM-DD.jsonl` | All market scans |
+| `signal_YYYY-MM-DD.jsonl` | Trading signals |
+| `trade_YYYY-MM-DD.jsonl` | Order executions |
+| `daily_summary.json` | End-of-day summary |
+
+---
+
+## 🌐 Deployment
+
+### Render (Recommended)
+- **Cost**: Free tier (750 hours/month)
+- **Setup**: See [DEPLOY_GUIDE.md](./DEPLOY_GUIDE.md)
+- **Health Check**: `/health` endpoint required
+
+### Oracle Cloud (Best Performance)
+- **Cost**: Free forever (2 ARM cores, 24GB RAM)
+- **Setup**: SSH to VM, install Node.js, run with PM2
+- **Advantage**: No timeout, full WebSocket support
+
+### Docker
+```bash
+# Build image
+docker build -t zerodha-bot .
+
+# Run locally
+docker run -p 3000:3000 --env-file .env zerodha-bot
+```
+
+---
+
+## ⚠️ Important Disclaimers
+
+1. **Trading involves risk of loss** - This software is for educational purposes only
+2. **Test thoroughly** - Always start with `TRADING_MODE=paper`
+3. **Past performance ≠ future results** - Backtests don't guarantee profitability
+4. **API rate limits** - Kite API has limits; monitor your usage
+5. **Token expiration** - Access tokens expire every 24 hours; refresh as needed
+6. **Consult professionals** - Seek advice from a financial advisor before trading
+
+---
+
+## 🔐 Security
+
+- Never commit `.env` to version control (it's in `.gitignore`)
+- Rotate API keys regularly
+- Use strong, unique passwords for Telegram bot
+- Monitor your Zerodha account for unauthorized activity
+
+---
+
+## 📞 Support
+
+For issues:
+1. Check bot logs: `pm2 logs zerodha-bot` or Render dashboard
+2. Verify Telegram bot works: Send any message to your bot
+3. Test Kite API: Run `npm run dev` locally
+4. Review [DEPLOY_GUIDE.md](./DEPLOY_GUIDE.md) for common fixes
+
+---
+
+## 📄 License
 
 MIT License - Use at your own risk.
+
+---
+
+## 🙏 Acknowledgments
+
+- [Zerodha Kite Connect](https://kite.trade/) - Trading API
+- [node-telegram-bot-api](https://github.com/yagop/node-telegram-bot-api) - Telegram integration
+- [ws](https://github.com/websockets/ws) - WebSocket library
+
+---
+
+**Built with ❤️ for automated trading**

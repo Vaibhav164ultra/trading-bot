@@ -1,211 +1,212 @@
-# Cloud Deployment Guide — Zerodha Live Trading Bot v2.0
+# Cloud Deployment Guide — Zerodha Live Trading Bot
 
-## Quick Deploy Options
-
-### Option A: Render.com (Free Tier) ⭐ Recommended
-**Cost:** $0/month | **Uptime:** 99.9% | **Limits:** 750hrs/month free
-
-#### Steps:
-1. **Push to GitHub**
-   ```bash
-   git add .
-   git commit -m "Add live trading bot v2.0"
-   git push origin master
-   ```
-
-2. **Create Render Account**
-   - Go to https://render.com
-   - Sign up with GitHub
-
-3. **Deploy Web Service**
-   - Click "New +" → "Web Service"
-   - Connect your repo
-   - Configure:
-     ```
-     Name: zerodha-bot
-     Environment: Node
-     Build Command: npm install && npm run build
-     Start Command: npm start
-     Instance Type: Free
-     ```
-
-4. **Add Environment Variables**
-   ```
-   KITE_API_KEY=your_api_key_here
-   KITE_API_SECRET=your_api_secret_here
-   KITE_ACCESS_TOKEN=your_access_token_here
-   TELEGRAM_BOT_TOKEN=your_bot_token_here
-   TELEGRAM_CHAT_ID=your_chat_id_here
-   WATCHLIST=RELIANCE,INFY,TCS,HDFCBANK,ICICIBANK,KOTAKBANK,SBIN,AXISBANK,ADANIENT,ADANIPORTS,MARUTI,TATASTEEL,HCLTECH,WIPRO,BHARTIARTL,ITC,LICI,POWERGRID,NTPC,ONGC,JSWSTEEL
-   TRADING_MODE=paper
-   PORT=3000
-   ```
-   PORT=3000
-   ```
-
-5. **Deploy!**
-   - Click "Create Web Service"
-   - Monitor logs in real-time
+Deploy your trading bot to the cloud for 24/7 automated trading.
 
 ---
 
-### Option B: Railway.app (Free Tier)
-**Cost:** $5 credit/month | **Uptime:** 99.9%
+## 🎯 Recommended: Render.com (Free Tier)
 
-#### Steps:
-1. Go to https://railway.app
-2. Sign up with GitHub
-3. Click "New Project" → "Deploy from GitHub"
-4. Select your repo
-5. Add environment variables (same as above)
-6. Deploy automatically
+**Cost**: $0/month | **Limits**: 750 hours/month free
 
----
+### Step 1: Push Code to GitHub
 
-### Option C: Oracle Cloud Free Tier (Forever Free) ⭐ Best Value
-**Cost:** $0/month forever | **Specs:** 2 ARM cores, 24GB RAM, 200GB storage
-
-#### Steps:
-1. Sign up at https://www.oracle.com/cloud/free/ (need credit card)
-2. Create a VM (Oracle Cloud Always Free)
-3. SSH into the VM
-4. Run these commands:
-   ```bash
-   # Install Node.js
-   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-   sudo apt-get install -y nodejs git
-   
-   # Clone and setup
-   git clone <your-repo-url>
-   cd zerodha-trading-analysis-execution
-   npm install
-   npm run build
-   
-   # Install PM2
-   npm install -g pm2
-   
-   # Create .env file
-   nano .env
-   # Paste your environment variables
-   
-   # Start with PM2
-   pm2 start ecosystem.config.js
-   pm2 save
-   pm2 startup systemd
-   ```
-
----
-
-### Option D: Docker (Any Cloud Provider)
-
-#### Build and Run:
 ```bash
-# Build Docker image
-docker build -t zerodha-bot .
-
-# Run locally
-docker run -p 3000:3000 --env-file .env zerodha-bot
-
-# Push to Docker Hub
-docker tag zerodha-bot yourusername/zerodha-bot:latest
-docker push yourusername/zerodha-bot:latest
+git add -A
+git commit -m "Ready for Render deployment"
+git push origin main
 ```
 
-#### Docker Compose (for local dev):
-```yaml
-version: '3.8'
-services:
-  bot:
-    build: .
-    env_file: .env
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
+Verify your repository is public or grant Render access.
+
+### Step 2: Create Render Account
+
+1. Go to https://render.com
+2. Click **"Sign Up"** → Connect with GitHub
+3. Verify your email
+
+### Step 3: Create Web Service
+
+1. Click **"New +"** → **"Web Service"**
+2. Select your repository: `Vaibhav164ultra/trading-bot`
+3. Click **"Connect"**
+
+### Step 4: Configure Service
+
+Fill in these exact values:
+
+| Setting | Value |
+|---------|-------|
+| **Name** | `zerodha-bot` |
+| **Region** | `US East (Northern Virginia)` |
+| **Branch** | `main` |
+| **Root Directory** | *(leave empty)* |
+| **Runtime** | `Node` |
+| **Build Command** | `npm install && npm run build` |
+| **Start Command** | `node dist/live.js` |
+| **Instance Type** | `Free` |
+
+### Step 5: Add Environment Variables
+
+Click **"Advanced"** → **"Add Environment Variable"** and add each one:
+
+```
+KITE_API_KEY=your_api_key_here
+KITE_API_SECRET=your_api_secret_here
+KITE_ACCESS_TOKEN=your_access_token_here
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+WATCHLIST=RELIANCE,INFY,TCS,HDFCBANK,ICICIBANK,KOTAKBANK,SBIN,AXISBANK,ADANIENT,ADANIPORTS,MARUTI,TATASTEEL,HCLTECH,WIPRO,BHARTIARTL,ITC,LICI,POWERGRID,NTPC,ONGC,JSWSTEEL
+TRADING_MODE=paper
+PORT=3000
+```
+
+### Step 6: Deploy
+
+1. Click **"Create Web Service"**
+2. Wait for build to complete (2-3 minutes)
+3. Copy the URL: `https://zerodha-bot.onrender.com`
+
+### Step 7: Verify Deployment
+
+Visit the health endpoint:
+```
+https://zerodha-bot.onrender.com/health
+```
+
+Expected response:
+```json
+{
+  "status": "running",
+  "uptime": 45,
+  "symbols": 21,
+  "timestamp": "..."
+}
+```
+
+### Step 8: Check Telegram
+
+You should receive:
+```
+🤖 Live Bot Started
+Mode: LIVE TRADING
+Watchlist: RELIANCE, INFY, TCS, ...
 ```
 
 ---
 
-## Monitoring & Management
+## 🚀 Alternative: Oracle Cloud (Always Free)
 
-### Check Status
+**Cost**: $0 forever | **Specs**: 2 ARM cores, 24GB RAM
+
+### Why Oracle Cloud?
+- No timeout issues (unlike Render free tier)
+- Full WebSocket support
+- 24/7 uptime guaranteed
+- Generous free resources
+
+### Setup Steps
+
+1. **Create Account**: https://www.oracle.com/cloud/free/
+2. **Create VM**: 
+   - Shape: ARM Ampere (free tier)
+   - Image: Ubuntu 22.04
+3. **SSH into VM** and run:
+
 ```bash
-# Local
-npm run scan
+# Install Node.js
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs git
 
-# PM2 (Cloud)
-pm2 status
-pm2 logs zerodha-bot
-```
+# Clone repo
+git clone https://github.com/Vaibhav164ultra/trading-bot.git
+cd trading-bot
 
-### View Logs
-```bash
-# PM2 logs
-pm2 logs zerodha-bot --lines 100
+# Install and build
+npm install
+npm run build
 
-# App logs
-tail -f logs/pm2-out.log
-```
+# Set environment variables
+cp .env.example .env
+nano .env  # Add your credentials
 
-### Control Bot
-```bash
-# Stop
-pm2 stop zerodha-bot
-
-# Restart
-pm2 restart zerodha-bot
-
-# Delete
-pm2 delete zerodha-bot
+# Start with PM2 (process manager)
+npm install -g pm2
+pm2 start ecosystem.config.js
+pm2 save
+pm2 startup systemd
 ```
 
 ---
 
-## Post-Deployment Checklist
+## ⚠️ Common Issues & Fixes
 
-- [ ] Verify Telegram bot sends startup message
-- [ ] Check API health endpoint: `http://your-domain/health`
-- [ ] Confirm WebSocket connection in logs
-- [ ] Test with `TRADING_MODE=paper` first
-- [ ] Monitor for 24 hours before switching to live
-- [ ] Set up alerting for bot downtime
+### Build Fails
+```
+Error: Cannot find module 'dist/live.js'
+```
+**Fix**: Ensure `npm run build` completes successfully before deploying.
 
----
-
-## Troubleshooting
+### WebSocket Connection Fails
+```
+WebSocket connection failed
+```
+**Fix**: This is normal on Render free tier. Bot continues with Yahoo Finance fallback data.
 
 ### Bot Not Starting
-```bash
-# Check logs
-pm2 logs zerodha-bot --err
-
-# Common issues:
-# - Missing KITE_ACCESS_TOKEN (expire every 24h)
-# - Invalid TELEGRAM_BOT_TOKEN
-# - Network/firewall blocking WebSocket
+Check Render logs:
+```
+Logs → Download logs → Search for "Error"
 ```
 
-### WebSocket Disconnections
-- Token expires every 24 hours - refresh it
-- Check internet connectivity
-- Render free tier has 15min idle timeout - use a ping service
+### Telegram Not Sending
+- Verify bot token is correct
+- Test with: `curl "https://api.telegram.org/bot<TOKEN>/getMe"`
+- Ensure chat ID is numeric (no quotes)
 
-### Order Failures
-- Check margin availability
-- Verify symbols are in your watchlist
-- Review Kite API error messages in logs
+### Token Expired
+Access tokens expire every 24 hours. Update environment variable:
+1. Go to Render Dashboard → Your Service → Environment
+2. Update `KITE_ACCESS_TOKEN` with fresh token
+3. Service auto-restarts
 
 ---
 
-## Security Notes
+## 📊 Monitoring
 
-⚠️ **Never commit `.env` to Git!**
-- Add to `.gitignore`
-- Use secret management in cloud platforms
-- Rotate tokens regularly
+### Render Dashboard
+- **Logs**: Real-time output
+- **Metrics**: CPU, memory usage
+- **Settings**: Edit environment variables
 
-## Support
+### Health Check
+```bash
+curl https://zerodha-bot.onrender.com/health
+```
 
-For issues, check:
-1. `logs/pm2-out.log` - Main logs
-2. `logs/pm2-error.log` - Error logs
-3. Telegram bot @vzerodha2024_bot - Alert messages
+### Manual Restart
+```bash
+# In Render dashboard
+Settings → Manual Deploy → Deploy
+```
+
+---
+
+## 🔒 Security Notes
+
+- Never commit `.env` to GitHub
+- Rotate API keys periodically
+- Use different tokens for paper vs live trading
+- Monitor your Zerodha account for unauthorized activity
+
+---
+
+## 🆘 Need Help?
+
+1. Check Render logs for errors
+2. Test locally first: `npm run live`
+3. Verify all environment variables are set
+4. Ensure your Kite access token is valid
+
+---
+
+**Happy Trading! 🚀**
