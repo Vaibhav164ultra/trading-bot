@@ -94,8 +94,8 @@ Create a `.env` file:
 
 ```env
 # Kite Connect API Credentials
-KITE_API_KEY=ypiygsv6trqk8d47
-KITE_API_SECRET=bmixgfskh5n2kqtoab3vqfovju61e7sn
+KITE_API_KEY=your_api_key_here
+KITE_API_SECRET=your_api_secret_here
 KITE_ACCESS_TOKEN=your_access_token_here
 
 # Trading Configuration
@@ -111,11 +111,11 @@ HISTORICAL_DAYS=365
 TIMEFRAME=5minute
 
 # Telegram
-TELEGRAM_BOT_TOKEN=8834718967:AAG36tGwq7WxJVD83gEv0wNpsYa2cxPFvR4
-TELEGRAM_CHAT_ID=8228599589
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
 
 # Watchlist (comma-separated)
-WATCHLIST=RELIANCE,INFY,TCS,HDFCBANK,ICICIBANK,KOTAKBANK,SBIN,AXISBANK,ADANIENT,ADANIPORTS,MARUTI,TATASTEEL,HCLTECH,WIPRO,BHARTIARTL,ITC,LICI,POWERGRID,NTPC,ONGC,JSWSTEEL
+WATCHLIST=RELIANCE,INFY,TCS,...
 
 # Server
 PORT=3000
@@ -217,12 +217,12 @@ pm2 restart zerodha-bot
 
 Your access token expires after ~24 hours. To regenerate:
 
-1. Visit: https://kite.zerodha.com/connect/login?api_key=ypiygsv6trqk8d47&v=3
+1. Visit: https://kite.zerodha.com/connect/login?api_key=YOUR_API_KEY&v=3
 2. Login with Zerodha credentials
 3. Copy the `request_token` from redirect URL
 4. Generate new access token:
    ```bash
-   node -e "const {KiteConnect}=require('kiteconnect'); const k=new KiteConnect({api_key:'ypiygsv6trqk8d47'}); (async()=>{const s=await k.generateSession('REQUEST_TOKEN','bmixgfskh5n2kqtoab3vqfovju61e7sn'); console.log(s.access_token);})();"
+   node -e "const {KiteConnect}=require('kiteconnect'); const k=new KiteConnect({api_key:'YOUR_API_KEY'}); (async()=>{const s=await k.generateSession('REQUEST_TOKEN','YOUR_API_SECRET'); console.log(s.access_token);})();"
    ```
 5. Update `.env` with new token
 
