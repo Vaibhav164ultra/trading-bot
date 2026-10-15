@@ -53,24 +53,6 @@ async function main() {
 
     const bot = new LiveBot();
 
-    // Parse watchlist
-    const symbols = config.WATCHLIST.split(',').map(s => s.trim()).filter(Boolean);
-    const instruments = await kiteClient.getInstruments('NSE');
-
-    for (const symbol of symbols) {
-      const instrument = instruments.find((i: any) => i.tradingsymbol === symbol);
-      if (instrument) {
-        await bot.addSymbol(symbol, instrument.instrument_token);
-      } else {
-        console.warn(`⚠️  Symbol "${symbol}" not found in NSE instruments`);
-      }
-    }
-
-    if (bot['watchlist'].length === 0) {
-      console.error('❌ No valid symbols in watchlist. Check WATCHLIST in .env');
-      return;
-    }
-
     await bot.initialize();
     await bot.start();
 
