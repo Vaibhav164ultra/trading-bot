@@ -11,12 +11,7 @@
     "start:scan": "node dist/index.js --auto",
     "live": "tsx watch src/live.ts",
     "scan": "tsx src/index.ts --auto",
-    "test": "vitest run",
-    "setup:scheduler": "tsx setup-scheduler.mjs",
-    "pm2:start": "pm2 start ecosystem.config.js",
-    "pm2:stop": "pm2 stop ecosystem.config.js",
-    "pm2:delete": "pm2 delete ecosystem.config.js",
-    "pm2:logs": "pm2 logs zerodha-bot"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

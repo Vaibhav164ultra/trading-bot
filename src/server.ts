@@ -5,22 +5,10 @@
 import { LiveBot } from './liveBot.js';
 import { LiveOrderExecutor } from './liveOrderExecutor.js';
 import { getConfig } from './config.js';
+import http from 'http';
 
 let bot: LiveBot | null = null;
 let executor: LiveOrderExecutor | null = null;
-
-// Simple in-memory store for HTTP server (no external dependencies needed)
-const routes: Map<string, (req: any, res: any) => void> = new Map();
-
-function getBot(): LiveBot {
-  if (!bot) throw new Error('Bot not initialized');
-  return bot;
-}
-
-function getExecutor(): LiveOrderExecutor {
-  if (!executor) throw new Error('Executor not initialized');
-  return executor;
-}
 
 // Export functions to set bot and executor
 export function setBot(b: LiveBot): void {
@@ -31,57 +19,78 @@ export function setExecutor(e: LiveOrderExecutor): void {
   executor = e;
 }
 
-// HTTP server using built-in http module
-import http from 'http';
-
-export function startServer(port: number = 3000): void {
+export function startServer(port: number = 3000): http.Server {
   const server = http.createServer((req, res) => {
+    // Set CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     res.setHeader('Content-Type', 'application/json');
 
-    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const url = new URL(req.url!, `http://localhost:${port}`);
     const path = url.pathname;
 
-    // Simple routing
-    if (req.method === 'GET' && path === '/health') {
-      const bot = getBot();
-      res.writeHead(200);
-      res.end(JSON.stringify({
-        status: bot.isRunningState ? 'running' : 'stopped',
-        uptime: Math.floor((Date.now() - bot.botStats.startedAt.getTime()) / 1000),
-        symbols: bot.watchlistState.length,
-      }));
-    }
-    else if (req.method === 'GET' && path === '/api/status') {
-      const bot = getBot();
-      const executor = getExecutor();
-      res.writeHead(200);
-      res.end(JSON.stringify({
-        bot: {
+    try {
+      // Health check endpoint
+      if (path === '/health' || path === '/') {
+        const botState = bot?.isRunningState ?? false;
+        const uptime = bot ? Math.floor((Date.now() - bot.botStats.startedAt.getTime()) / 1000) : 0;
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          status: botState ? 'running' : 'stopped',
+          uptime: uptime,
+          symbols: bot?.watchlistState.length ?? 0,
+          timestamp: new Date().toISOString(),
+        }));
+        return;
+      }
+
+      // API endpoints
+      if (path === '/api/status') {
+        const botData = bot ? {
           isRunning: bot.isRunningState,
           stats: bot.botStats,
           watchlist: bot.watchlistState,
-        },
-        positions: executor.getPositions(),
-        risk: executor.getRiskMetrics(),
-      }));
-    }
-    else if (req.method === 'GET' && path === '/api/positions') {
-      const executor = getExecutor();
-      res.writeHead(200);
-      res.end(JSON.stringify(executor.getPositions()));
-    }
-    else if (req.method === 'GET' && path === '/api/risk') {
-      const executor = getExecutor();
-      res.writeHead(200);
-      res.end(JSON.stringify(executor.getRiskMetrics()));
-    }
-    else {
+        } : null;
+        res.writeHead(200);
+        res.end(JSON.stringify({ bot: botData }));
+        return;
+      }
+
+      if (path === '/api/positions') {
+        res.writeHead(200);
+        res.end(JSON.stringify(executor?.getPositions() ?? []));
+        return;
+      }
+
+      if (path === '/api/risk') {
+        res.writeHead(200);
+        res.end(JSON.stringify(executor?.getRiskMetrics() ?? {}));
+        return;
+      }
+
+      // Not found
       res.writeHead(404);
       res.end(JSON.stringify({ error: 'Not found' }));
+    } catch (error: any) {
+      console.error('Server error:', error.message);
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: 'Internal server error' }));
     }
   });
 
-  server.listen(port, () => {
-    console.log(`🌐 API server listening on http://localhost:${port}`);
+  server.listen(port, '0.0.0.0', () => {
+    console.log(`🌐 API server listening on http://0.0.0.0:${port}`);
+    console.log(`📊 Health check: http://localhost:${port}/health`);
   });
+
+  return server;
 }
+

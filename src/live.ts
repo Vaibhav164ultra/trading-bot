@@ -11,7 +11,7 @@ import { setBot, setExecutor, startServer } from './server.js';
 async function main() {
   const config = getConfig();
 
-  console.log('🚀 Zerodha Live Trading Bot');
+  console.log('🚀 Zerodha Live Trading Bot v2.0');
   console.log(`Mode: 🔴 LIVE TRADING`);
   console.log(`Trading Mode: ${config.TRADING_MODE}`);
   console.log(`Watchlist: ${config.WATCHLIST}`);
@@ -27,18 +27,27 @@ async function main() {
     await bot.initialize();
     await bot.start();
 
-    // Start HTTP API server
-    try {
-      startServer(config.PORT);
-    } catch (e) {
-      console.log('⚠️  API server failed to start (port may be in use)');
-    }
+    // Start HTTP API server on configured port
+    const server = startServer(config.PORT);
+
+    // Graceful shutdown
+    const shutdown = async (signal: string) => {
+      console.log(`\n${signal} received. Shutting down...`);
+      bot.stop();
+      server.close(() => {
+        console.log('🛑 Server closed');
+        process.exit(0);
+      });
+    };
+
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
 
     console.log('\n✅ Bot is running. Monitoring markets...\n');
     console.log('Press Ctrl+C to stop\n');
 
-  } catch (error) {
-    console.error('❌ Failed to start bot:', error);
+  } catch (error: any) {
+    console.error('❌ Failed to start bot:', error.message);
     process.exit(1);
   }
 }

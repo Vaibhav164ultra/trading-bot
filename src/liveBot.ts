@@ -128,6 +128,7 @@ export class LiveBot {
     }
 
     this.isRunning = true;
+    this.stats.startedAt = new Date();
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('🤖 LIVE TRADING BOT STARTED');
@@ -146,8 +147,14 @@ export class LiveBot {
       );
     }
 
-    // Connect WebSocket
-    this.webSocket.connect();
+    // Connect WebSocket (with timeout - might fail in some environments)
+    try {
+      this.webSocket.connect();
+      console.log('🔌 WebSocket initiated');
+    } catch (wsErr) {
+      console.warn('⚠️  WebSocket connection failed:', wsErr);
+      console.log('   Bot will continue in monitoring mode without live ticks');
+    }
 
     // Start periodic tasks
     this.positionCheckTimer = setInterval(() => this.checkPositions(), POSITION_CHECK_INTERVAL);
@@ -156,6 +163,8 @@ export class LiveBot {
     // Handle shutdown
     process.on('SIGINT', () => this.shutdown());
     process.on('SIGTERM', () => this.shutdown());
+
+    console.log('✅ Bot is running. Monitoring markets...\n');
   }
 
   /**
