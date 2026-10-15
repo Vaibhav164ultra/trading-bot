@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 import { getConfig } from './config.js';
 import type { Ticker } from './types.js';
 
-const WSS_URL = 'wss://websocket.kite.trade/';
+const WSS_URL = 'wss://ws.kite.trade/';
 
 export class KiteWebSocket {
   private config = getConfig();

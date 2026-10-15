@@ -53,6 +53,7 @@ export class LiveBot {
   };
   private positionCheckTimer: NodeJS.Timeout | null = null;
   private summaryTimer: NodeJS.Timeout | null = null;
+  private pollingTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.kiteClient = new KiteClient(this.config.KITE_ACCESS_TOKEN);
@@ -151,10 +152,14 @@ export class LiveBot {
     try {
       this.webSocket.connect();
       console.log('🔌 WebSocket initiated');
-    } catch (wsErr) {
-      console.warn('⚠️  WebSocket connection failed:', wsErr);
-      console.log('   Bot will continue in monitoring mode without live ticks');
+    } catch (wsErr: any) {
+      console.warn('⚠️  WebSocket connection failed:', wsErr?.message);
+      console.log('   Bot will continue with polling mode');
     }
+
+    // Start polling as fallback (every 30 seconds)
+    console.log('📡 Starting polling mode (30s intervals)...');
+    this.pollingTimer = setInterval(() => this.pollMarketData(), 30000);
 
     // Start periodic tasks
     this.positionCheckTimer = setInterval(() => this.checkPositions(), POSITION_CHECK_INTERVAL);
@@ -251,6 +256,46 @@ export class LiveBot {
   }
 
   /**
+   * Poll market data as fallback when WebSocket fails
+   */
+  private async pollMarketData(): Promise<void> {
+    if (!this.isRunning) return;
+
+    this.stats.scansCompleted++;
+
+    for (const state of this.watchlist) {
+      try {
+        const candles = await this.kiteClient.getHistoricalCandles(
+          state.token,
+          1,
+          this.config.TIMEFRAME
+        );
+
+        if (candles.length > 0) {
+          const latestCandle = candles[0];
+
+          // Update the state's candle data
+          if (state.candles.length === 0 ||
+              Math.abs(state.candles[state.candles.length - 1].close - latestCandle.close) > 0.01) {
+            state.candles.push(latestCandle);
+            if (state.candles.length > 500) {
+              state.candles = state.candles.slice(-500);
+            }
+          }
+
+          // Analyze if we have enough data
+          if (state.candles.length >= 50) {
+            await this.analyzeSymbol(state);
+          }
+        }
+      } catch (error) {
+        console.error(`Error polling ${state.symbol}:`, error);
+        this.stats.errors++;
+      }
+    }
+  }
+
+  /**
    * Send periodic summary to Telegram
    */
   private async sendSummary(): Promise<void> {
@@ -304,6 +349,10 @@ export class LiveBot {
     if (this.summaryTimer) {
       clearInterval(this.summaryTimer);
       this.summaryTimer = null;
+    }
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = null;
     }
 
     this.webSocket.disconnect();
