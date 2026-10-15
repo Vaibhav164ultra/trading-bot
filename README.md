@@ -213,12 +213,16 @@ docker run -p 3000:3000 --env-file .env zerodha-bot
 
 ---
 
-## 🔐 Security
+## 🔐 Security & Credential Rotation
 
-- Never commit `.env` to version control (it's in `.gitignore`)
-- Rotate API keys regularly
-- Use strong, unique passwords for Telegram bot
-- Monitor your Zerodha account for unauthorized activity
+⚠️ **Important**: After testing is complete, rotate your Kite API credentials:
+
+1. Go to Zerodha Dashboard → **Settings** → **API**
+2. Click **"Regenerate Secret"**
+3. Update your environment variables with the new secret
+4. Delete the old `.env` from your local machine
+
+**Never commit `.env` to GitHub** - it's automatically ignored.
 
 ---
 
