@@ -15,9 +15,10 @@ const MARKET_OPEN = { hour: 9, minute: 15 };
 const MARKET_CLOSE = { hour: 15, minute: 30 };
 const STRONG_SIGNAL_THRESHOLD = 0.55;
 const ALERT_INTERVAL = 30000; // 30 seconds
-const SUMMARY_INTERVAL = 120000; // 2 minutes for detailed summary (reduced frequency)
-const SIGNAL_COOLDOWN = 120000; // 2 minutes cooldown per symbol per strategy
-const GLOBAL_ALERT_COOLDOWN = 10000; // 10 seconds between any alerts
+const SUMMARY_INTERVAL = 120000; // 2 minutes for detailed summary
+const SIGNAL_COOLDOWN = 180000; // 3 minutes cooldown per symbol per strategy
+const GLOBAL_ALERT_COOLDOWN = 15000; // 15 seconds between any alerts
+const API_CALL_DELAY = 500; // 500ms delay between API calls
 
 interface SymbolState {
   symbol: string;
@@ -105,12 +106,22 @@ export class LiveBot {
     this.telegram = new TelegramNotifier();
   }
 
+  /**
+   * Delay helper to prevent rate limiting
+   */
+  private async delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   async addSymbol(symbol: string, token: number): Promise<void> {
+    // Fetch fewer candles to avoid rate limits - only need 100 for analysis
     const candles = await this.kiteClient.getHistoricalCandles(
       token,
-      this.config.HISTORICAL_DAYS,
+      10, // 10 days instead of 365
       this.config.TIMEFRAME
     );
+
+    await this.delay(API_CALL_DELAY); // Small delay between calls
 
     this.watchlist.push({
       symbol,
@@ -124,13 +135,42 @@ export class LiveBot {
   }
 
   async initialize(): Promise<void> {
+    // Send initial confirmation immediately (before heavy API calls)
+    if (this.telegram.isConnected) {
+      await this.telegram.send(
+        `🤖 <b>Initializing Bot...</b>\n\nMode: <b>ALERTS ONLY</b>\nLoading watchlist...`
+      );
+    }
+
+    await this.delay(2000); // Wait before making API calls
+
+    // Fetch instruments list
     const instruments = await this.kiteClient.getInstruments('NSE');
     const symbols = this.config.WATCHLIST.split(',').map(s => s.trim()).filter(Boolean);
 
-    for (const symbol of symbols) {
-      const instrument = instruments.find((i: any) => i.tradingsymbol === symbol);
+    console.log(`Found ${instruments.length} instruments in NSE`);
+
+    // Add symbols with delays between each
+    for (let i = 0; i < symbols.length; i++) {
+      const symbol = symbols[i];
+      const instrument = instruments.find((inst: any) => inst.tradingsymbol === symbol);
+
       if (instrument) {
-        await this.addSymbol(symbol, instrument.instrument_token);
+        try {
+          await this.addSymbol(symbol, instrument.instrument_token);
+        } catch (error: any) {
+          console.error(`⚠️  Failed to add ${symbol}:`, error.message);
+          if (error.message?.includes('Too many requests')) {
+            console.log(`   Waiting 5 seconds before continuing...`);
+            await this.delay(5000);
+            // Try again once
+            try {
+              await this.addSymbol(symbol, instrument.instrument_token);
+            } catch (retryError) {
+              console.error(`   Still failed after retry`);
+            }
+          }
+        }
       } else {
         console.warn(`⚠️  Symbol "${symbol}" not found in NSE instruments`);
       }
@@ -140,6 +180,7 @@ export class LiveBot {
       throw new Error('No valid symbols in watchlist. Check WATCHLIST in .env');
     }
 
+    // Subscribe to WebSocket
     const tokens = this.watchlist.map(s => s.token);
     this.webSocket.subscribe(tokens);
     this.webSocket.onTick(this.handleTick.bind(this));
@@ -167,12 +208,16 @@ export class LiveBot {
     console.log(`⚠️  Mode: ALERTS ONLY (no trading execution)`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
+    // Send startup message
     if (this.telegram.isConnected) {
       await this.telegram.send(
         `🤖 <b>Alert-Only Bot Started</b>\n\nMode: <b>ALERTS ONLY</b>\nWatchlist: ${this.watchlist.map(s => s.symbol).join(', ')}\n\nI'll send you detailed market updates every 2 minutes during trading hours. No trades will be placed.`
       );
     }
 
+    await this.delay(2000);
+
+    // Connect WebSocket
     try {
       this.webSocket.connect();
       console.log('🔌 WebSocket initiated');
@@ -364,7 +409,7 @@ export class LiveBot {
 
     if (buys.length > 0) {
       message += `<b>🟢 Buy Signals (${buys.length}):</b>\n`;
-      for (const s of buys.slice(0, 3)) { // Limit to 3 buys
+      for (const s of buys.slice(0, 3)) {
         const strength = Math.round(s.signal.strength * 100);
         message += `• ${s.symbol} — ${s.strategy} @ ₹${s.price.toFixed(0)} (${strength}%)\n`;
       }
@@ -376,7 +421,7 @@ export class LiveBot {
 
     if (sells.length > 0) {
       message += `<b>🔴 Sell Signals (${sells.length}):</b>\n`;
-      for (const s of sells.slice(0, 3)) { // Limit to 3 sells
+      for (const s of sells.slice(0, 3)) {
         const strength = Math.round(s.signal.strength * 100);
         message += `• ${s.symbol} — ${s.strategy} @ ₹${s.price.toFixed(0)} (${strength}%)\n`;
       }
@@ -417,6 +462,8 @@ export class LiveBot {
           this.config.TIMEFRAME
         );
 
+        await this.delay(API_CALL_DELAY);
+
         if (candles.length > 0) {
           const latestCandle = candles[0];
 
@@ -433,9 +480,15 @@ export class LiveBot {
             await this.analyzeSymbol(state);
           }
         }
-      } catch (error) {
-        console.error(`Error polling ${state.symbol}:`, error);
+      } catch (error: any) {
+        console.error(`Error polling ${state.symbol}:`, error.message);
         this.stats.errors++;
+
+        // Handle rate limiting gracefully
+        if (error.message?.includes('Too many requests')) {
+          console.log(`   Rate limited. Waiting 10 seconds...`);
+          await this.delay(10000);
+        }
       }
     }
   }
