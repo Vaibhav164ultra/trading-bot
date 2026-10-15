@@ -10,6 +10,9 @@ import { getHistoricalData } from './historicalData.js';
 export class KiteClient {
   private kite: any;
   private config = getConfig();
+  private instrumentsCache: any[] | null = null;
+  private instrumentsFetchTime = 0;
+  private readonly INSTRUMENTS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(accessToken?: string) {
     this.kite = new KiteConnect({
@@ -19,6 +22,35 @@ export class KiteClient {
     if (accessToken) {
       this.kite.setAccessToken(accessToken);
     }
+  }
+
+  /**
+   * Get instruments with caching to reduce API calls
+   */
+  async getInstruments(exchange?: any): Promise<any[]> {
+    const now = Date.now();
+
+    // Return cached instruments if still valid
+    if (this.instrumentsCache && (now - this.instrumentsFetchTime) < this.INSTRUMENTS_CACHE_TTL) {
+      return this.instrumentsCache;
+    }
+
+    try {
+      this.instrumentsCache = await this.kite.getInstruments(exchange);
+      this.instrumentsFetchTime = now;
+      return this.instrumentsCache || [];
+    } catch (error) {
+      console.error('Failed to fetch instruments:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear instruments cache (call after token refresh)
+   */
+  clearInstrumentsCache(): void {
+    this.instrumentsCache = null;
+    this.instrumentsFetchTime = 0;
   }
 
   getLoginURL(): string {
@@ -37,12 +69,7 @@ export class KiteClient {
   // Market Data
   // -------------------------------------------------------------------
 
-  async getInstruments(exchange?: any): Promise<any[]> {
-    return await this.kite.getInstruments(exchange);
-  }
-
   async getQuote(instruments: string | string[]): Promise<any> {
-    // Fallback to historical candles if getQuote permission is not active on free tier
     const token = Array.isArray(instruments) ? instruments[0] : instruments;
     const candles = await this.getHistoricalCandles(Number(token), 2, 'day');
     const latest = candles[candles.length - 1];
@@ -77,13 +104,22 @@ export class KiteClient {
     days: number,
     interval: any = 'day'
   ): Promise<Candle[]> {
-    const config = getConfig();
-    // For NSE instruments, we can map token to symbol for fallback
-    const nseInstruments = await this.getInstruments('NSE');
-    const instrument = nseInstruments.find((i: any) => i.instrument_token == instrumentToken);
-    const fallbackSymbol = instrument?.tradingsymbol;
+    // Use minimal historical data to avoid rate limits
+    // For live monitoring, we only need recent candles
+    const actualDays = Math.min(days, 5); // Max 5 days to start
 
-    return getHistoricalData(this.kite, instrumentToken, days, interval, fallbackSymbol);
+    // Try to get instruments from cache first
+    let fallbackSymbol: string | undefined;
+    try {
+      const instruments = await this.getInstruments('NSE');
+      const instrument = instruments.find((i: any) => i.instrument_token == instrumentToken);
+      fallbackSymbol = instrument?.tradingsymbol;
+    } catch {
+      // Use token as fallback if instruments fetch fails
+      fallbackSymbol = `TOKEN_${instrumentToken}`;
+    }
+
+    return getHistoricalData(this.kite, instrumentToken, actualDays, interval, fallbackSymbol);
   }
 
   // -------------------------------------------------------------------
