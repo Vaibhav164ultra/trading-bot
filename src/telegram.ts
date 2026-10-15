@@ -1,5 +1,6 @@
 /**
  * Telegram notification module for trading alerts
+ * Includes rate limiting to avoid Telegram API limits
  */
 
 import { Bot } from 'node-telegram-bot-api/node';
@@ -11,6 +12,8 @@ export class TelegramNotifier {
   private bot: Bot | null = null;
   private config = getConfig();
   private chatId: string | null = null;
+  private lastSendTime = 0;
+  private readonly MIN_DELAY_MS = 2000; // Minimum 2 seconds between messages
 
   constructor() {
     const token = this.config.TELEGRAM_BOT_TOKEN;
@@ -36,14 +39,45 @@ export class TelegramNotifier {
   }
 
   /**
-   * Send a message to Telegram
+   * Send a message to Telegram with rate limiting
    */
   async send(text: string, parseMode: 'HTML' | 'Markdown' | undefined = 'HTML'): Promise<void> {
     if (!this.bot || !this.chatId) return;
+
+    // Check rate limit
+    const now = Date.now();
+    const timeSinceLastSend = now - this.lastSendTime;
+
+    if (timeSinceLastSend < this.MIN_DELAY_MS) {
+      await new Promise(resolve => setTimeout(resolve, this.MIN_DELAY_MS - timeSinceLastSend));
+    }
+
     try {
-      await this.bot.api.sendMessage({ chat_id: this.chatId, text, parse_mode: parseMode });
-    } catch (error) {
-      console.error('❌ Failed to send Telegram message:', error);
+      await this.bot.api.sendMessage({
+        chat_id: this.chatId,
+        text,
+        parse_mode: parseMode,
+      });
+      this.lastSendTime = Date.now();
+    } catch (error: any) {
+      // Handle Telegram rate limits gracefully
+      if (error.code === 429 && error.parameters) {
+        const retryAfter = error.parameters.retry_after || 5;
+        console.warn(`⚠️  Telegram rate limit hit. Waiting ${retryAfter} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        // Try again once after waiting
+        try {
+          await this.bot.api.sendMessage({
+            chat_id: this.chatId,
+            text,
+            parse_mode: parseMode,
+          });
+        } catch (retryError) {
+          console.error('❌ Failed to send Telegram message after retry:', retryError);
+        }
+      } else {
+        console.error('❌ Failed to send Telegram message:', error.message || error);
+      }
     }
   }
 

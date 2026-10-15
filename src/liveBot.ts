@@ -1,6 +1,6 @@
 /**
  * Live trading bot - Alert Only Mode
- * Sends detailed, AI-like market alerts every 30 seconds during market hours
+ * Sends detailed, AI-like market alerts during market hours
  * No trading execution - monitoring and analysis only
  */
 
@@ -15,8 +15,9 @@ const MARKET_OPEN = { hour: 9, minute: 15 };
 const MARKET_CLOSE = { hour: 15, minute: 30 };
 const STRONG_SIGNAL_THRESHOLD = 0.55;
 const ALERT_INTERVAL = 30000; // 30 seconds
-const SUMMARY_INTERVAL = 90000; // 90 seconds for detailed summary
-const SIGNAL_COOLDOWN = 60000; // 1 minute cooldown per symbol per strategy
+const SUMMARY_INTERVAL = 120000; // 2 minutes for detailed summary (reduced frequency)
+const SIGNAL_COOLDOWN = 120000; // 2 minutes cooldown per symbol per strategy
+const GLOBAL_ALERT_COOLDOWN = 10000; // 10 seconds between any alerts
 
 interface SymbolState {
   symbol: string;
@@ -96,6 +97,7 @@ export class LiveBot {
   private messageIndex = 0;
   private lastAlertKey = '';
   private lastSummaryTime = 0;
+  private lastGlobalAlertTime = 0;
 
   constructor() {
     this.kiteClient = new KiteClient(this.config.KITE_ACCESS_TOKEN);
@@ -167,7 +169,7 @@ export class LiveBot {
 
     if (this.telegram.isConnected) {
       await this.telegram.send(
-        `🤖 <b>Alert-Only Bot Started</b>\n\nMode: <b>ALERTS ONLY</b>\nWatchlist: ${this.watchlist.map(s => s.symbol).join(', ')}\n\nI'll send you detailed market updates every 30 seconds during trading hours. No trades will be placed.`
+        `🤖 <b>Alert-Only Bot Started</b>\n\nMode: <b>ALERTS ONLY</b>\nWatchlist: ${this.watchlist.map(s => s.symbol).join(', ')}\n\nI'll send you detailed market updates every 2 minutes during trading hours. No trades will be placed.`
       );
     }
 
@@ -211,7 +213,10 @@ export class LiveBot {
   private async analyzeSymbol(state: SymbolState): Promise<void> {
     if (!this.isMarketHours()) return;
 
+    // Check global alert cooldown
     const now = Date.now();
+    if (now - this.lastGlobalAlertTime < GLOBAL_ALERT_COOLDOWN) return;
+
     const currentPrice = state.currentPrice || state.candles[state.candles.length - 1].close;
 
     for (const name of listStrategies()) {
@@ -227,6 +232,7 @@ export class LiveBot {
         if (signal.strength >= STRONG_SIGNAL_THRESHOLD) {
           this.stats.signalsFired++;
           state.lastSignalTime[name] = now;
+          this.lastGlobalAlertTime = now;
 
           console.log(`🔔 Signal: ${state.symbol} - ${name} - ${signal.action.toUpperCase()} (strength: ${(signal.strength * 100).toFixed(0)}%)`);
 
@@ -298,11 +304,12 @@ export class LiveBot {
     if (!this.isRunning) return;
     if (!this.isMarketHours()) return;
 
-    this.stats.scansCompleted++;
-
+    // Check cooldown
     const now = Date.now();
     if (now - this.lastSummaryTime < SUMMARY_INTERVAL) return;
     this.lastSummaryTime = now;
+
+    this.stats.scansCompleted++;
 
     const signals: Array<{ symbol: string; strategy: string; signal: StrategySignal; price: number }> = [];
 
@@ -357,24 +364,24 @@ export class LiveBot {
 
     if (buys.length > 0) {
       message += `<b>🟢 Buy Signals (${buys.length}):</b>\n`;
-      for (const s of buys.slice(0, 5)) {
+      for (const s of buys.slice(0, 3)) { // Limit to 3 buys
         const strength = Math.round(s.signal.strength * 100);
-        message += `• ${s.symbol} — ${s.strategy} @ ₹${s.price.toFixed(0)} (${strength}% strength)\n`;
+        message += `• ${s.symbol} — ${s.strategy} @ ₹${s.price.toFixed(0)} (${strength}%)\n`;
       }
-      if (buys.length > 5) {
-        message += `• ...and ${buys.length - 5} more\n`;
+      if (buys.length > 3) {
+        message += `• ...and ${buys.length - 3} more\n`;
       }
       message += '\n';
     }
 
     if (sells.length > 0) {
       message += `<b>🔴 Sell Signals (${sells.length}):</b>\n`;
-      for (const s of sells.slice(0, 5)) {
+      for (const s of sells.slice(0, 3)) { // Limit to 3 sells
         const strength = Math.round(s.signal.strength * 100);
-        message += `• ${s.symbol} — ${s.strategy} @ ₹${s.price.toFixed(0)} (${strength}% strength)\n`;
+        message += `• ${s.symbol} — ${s.strategy} @ ₹${s.price.toFixed(0)} (${strength}%)\n`;
       }
-      if (sells.length > 5) {
-        message += `• ...and ${sells.length - 5} more\n`;
+      if (sells.length > 3) {
+        message += `• ...and ${sells.length - 3} more\n`;
       }
       message += '\n';
     }
@@ -392,7 +399,7 @@ export class LiveBot {
     }
 
     message += `<i>${sentiment}</i>\n\n`;
-    message += `📡 Scanning ${this.watchlist.length} stocks | ${this.stats.scansCompleted} scans completed`;
+    message += `📡 Scanning ${this.watchlist.length} stocks | ${this.stats.scansCompleted} scans`;
 
     return message.trim();
   }
