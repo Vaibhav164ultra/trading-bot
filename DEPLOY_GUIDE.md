@@ -1,6 +1,6 @@
-# Cloud Deployment Guide — Zerodha Live Trading Bot
+# Cloud Deployment Guide — Zerodha Alert Bot (Alert-Only Mode)
 
-Deploy your trading bot to the cloud for 24/7 automated trading.
+Deploy your trading alert bot to the cloud for 24/7 automated monitoring.
 
 ---
 
@@ -12,7 +12,7 @@ Deploy your trading bot to the cloud for 24/7 automated trading.
 
 ```bash
 git add -A
-git commit -m "Ready for Render deployment"
+git commit -m "Update for Render deployment"
 git push origin main
 ```
 
@@ -56,7 +56,6 @@ KITE_ACCESS_TOKEN=your_access_token_here
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
 WATCHLIST=RELIANCE,INFY,TCS,HDFCBANK,ICICIBANK,KOTAKBANK,SBIN,AXISBANK,ADANIENT,ADANIPORTS,MARUTI,TATASTEEL,HCLTECH,WIPRO,BHARTIARTL,ITC,LICI,POWERGRID,NTPC,ONGC,JSWSTEEL
-TRADING_MODE=paper
 PORT=3000
 ```
 
@@ -79,6 +78,8 @@ Expected response:
   "status": "running",
   "uptime": 45,
   "symbols": 21,
+  "alertsSent": 0,
+  "signalsFired": 0,
   "timestamp": "..."
 }
 ```
@@ -87,53 +88,12 @@ Expected response:
 
 You should receive:
 ```
-🤖 Live Bot Started
-Mode: LIVE TRADING
+🤖 Alert-Only Bot Started
+
+Mode: ALERTS ONLY
 Watchlist: RELIANCE, INFY, TCS, ...
-```
 
----
-
-## 🚀 Alternative: Oracle Cloud (Always Free)
-
-**Cost**: $0 forever | **Specs**: 2 ARM cores, 24GB RAM
-
-### Why Oracle Cloud?
-- No timeout issues (unlike Render free tier)
-- Full WebSocket support
-- 24/7 uptime guaranteed
-- Generous free resources
-
-### Setup Steps
-
-1. **Create Account**: https://www.oracle.com/cloud/free/
-2. **Create VM**: 
-   - Shape: ARM Ampere (free tier)
-   - Image: Ubuntu 22.04
-3. **SSH into VM** and run:
-
-```bash
-# Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs git
-
-# Clone repo
-git clone https://github.com/Vaibhav164ultra/trading-bot.git
-cd trading-bot
-
-# Install and build
-npm install
-npm run build
-
-# Set environment variables
-cp .env.example .env
-nano .env  # Add your credentials
-
-# Start with PM2 (process manager)
-npm install -g pm2
-pm2 start ecosystem.config.js
-pm2 save
-pm2 startup systemd
+I'll send you detailed market updates every 30 seconds during trading hours. No trades will be placed.
 ```
 
 ---
@@ -150,7 +110,7 @@ Error: Cannot find module 'dist/live.js'
 ```
 WebSocket connection failed
 ```
-**Fix**: This is normal on Render free tier. Bot continues with Yahoo Finance fallback data.
+**Fix**: This is normal on Render free tier. Bot continues with polling mode (30s intervals).
 
 ### Bot Not Starting
 Check Render logs:
@@ -168,6 +128,16 @@ Access tokens expire every 24 hours. Update environment variable:
 1. Go to Render Dashboard → Your Service → Environment
 2. Update `KITE_ACCESS_TOKEN` with fresh token
 3. Service auto-restarts
+
+### Service Showing 502 Error
+**This is normal on Render free tier!** The free tier puts services to sleep after 15 minutes of inactivity.
+
+**To wake it up:**
+1. Visit your health endpoint: `https://zerodha-bot.onrender.com/health`
+2. Wait 30-60 seconds for the service to warm up
+3. The service will stay active while receiving requests
+
+**Better alternative:** Use a free uptime monitor like [UptimeRobot](https://uptimerobot.com/) to ping your bot every 5 minutes, keeping it warm.
 
 ---
 
