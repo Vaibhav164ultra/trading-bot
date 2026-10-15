@@ -1,6 +1,6 @@
-# Zerodha Live Trading Bot
+# Zerodha Live Trading Bot (Alert-Only Mode)
 
-An automated trading system for Indian stock markets using Zerodha Kite Connect API with real-time WebSocket monitoring, strategy-based signal detection, and Telegram notifications.
+An automated trading analysis system for Indian stock markets using Zerodha Kite Connect API with real-time monitoring, strategy-based signal detection, and Telegram notifications. **Alert-only mode - no trading execution.**
 
 ## 🚀 Quick Start
 
@@ -21,7 +21,7 @@ npm install
 # Build TypeScript
 npm run build
 
-# Run in paper trading mode (safe testing)
+# Run in alert-only mode
 npm run live
 ```
 
@@ -36,11 +36,24 @@ See [DEPLOY_GUIDE.md](./DEPLOY_GUIDE.md) for step-by-step instructions.
 |---------|-------------|
 | **Real-time Monitoring** | WebSocket connection to Kite for live price updates |
 | **7 Trading Strategies** | MA Crossover, RSI Reversion, MACD, Bollinger Bands, Conservative RSI, Tight BBands, Scalper |
-| **Automated Execution** | Places orders when signals trigger (paper/live mode) |
-| **Risk Management** | Stop loss, target, position limits, daily loss limits |
-| **Telegram Alerts** | Instant notifications for signals, orders, and summaries |
-| **History Logging** | All scans and trades saved to JSONL files |
+| **Alert-Only Mode** | Sends detailed market alerts — NO trading execution |
+| **AI-Like Messages** | Natural language alerts that don't sound repetitive |
+| **30-Second Updates** | Market scans every 30 seconds during trading hours |
+| **90-Second Summaries** | Detailed market overviews with sentiment analysis |
+| **Telegram Alerts** | Instant notifications for signals and updates |
+| **History Logging** | All scans and signals saved to JSONL files |
 | **HTTP API** | Health checks and status endpoints for monitoring |
+
+---
+
+## ⚠️ Important: Alert-Only Mode
+
+This bot runs in **ALERT-ONLY** mode. It will:
+- ✅ Monitor 21 NSE stocks continuously
+- ✅ Analyze using 7 trading strategies
+- ✅ Send detailed Telegram alerts when signals trigger (strength ≥ 55%)
+- ✅ Provide market summaries every 90 seconds
+- ❌ **NOT place any trades** (no paper or live trading)
 
 ---
 
@@ -60,8 +73,8 @@ KITE_ACCESS_TOKEN=your_access_token_here
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
 
-# Trading Parameters
-TRADING_MODE=paper          # paper | live
+# Trading Parameters (for reference only - not executed)
+TRADING_MODE=paper
 DEFAULT_QUANTITY=1
 MAX_POSITIONS=5
 STOP_LOSS_PCT=0.5
@@ -104,7 +117,7 @@ src/
 ├── live.ts              # Entry point for production
 ├── liveBot.ts           # Core bot logic (WebSocket + analysis)
 ├── websocketClient.ts   # Kite WebSocket connection
-├── liveOrderExecutor.ts # Order placement & position management
+├── liveOrderExecutor.ts # Order execution (kept for compatibility)
 ├── server.ts            # HTTP API for monitoring
 ├── autoTrader.ts        # Periodic scan mode
 ├── strategies.ts        # 7 trading strategies
@@ -124,8 +137,7 @@ src/
 |----------|--------|-------------|
 | `/health` | GET | Health check (for Render uptime monitoring) |
 | `/api/status` | GET | Bot status and watchlist |
-| `/api/positions` | GET | Open positions |
-| `/api/risk` | GET | Risk metrics |
+| `/api/alerts` | GET | Alert statistics |
 
 ### Example Health Check Response
 ```json
@@ -133,36 +145,54 @@ src/
   "status": "running",
   "uptime": 3600,
   "symbols": 21,
+  "alertsSent": 45,
+  "signalsFired": 12,
   "timestamp": "2026-10-15T10:00:00.000Z"
 }
 ```
 
 ---
 
-## 🚨 Risk Management
-
-The bot enforces multiple safety controls:
-
-1. **Stop Loss**: 0.5% below entry price (configurable)
-2. **Target Profit**: 1.5% above entry price (configurable)
-3. **Max Positions**: 5 simultaneous positions (configurable)
-4. **Daily Loss Limit**: 2% of starting equity (configurable)
-5. **Symbol Cooldown**: 5 minutes between trades per symbol
-6. **Paper/Live Mode**: Always test in paper mode first
-
----
-
 ## 📱 Telegram Alerts
+
+The bot sends AI-like, natural language alerts during market hours (9:15 AM - 3:30 PM IST):
 
 | Event | Message Format |
 |-------|----------------|
-| **Bot Start** | "🤖 Live Bot Started" with watchlist |
-| **Signal** | "🟢 BUY RELIANCE - MA Crossover" with strength % |
-| **Order Placed** | "📤 Order placed: BUY RELIANCE ×1 @ 2450" |
-| **Stop Loss Hit** | "🛑 STOP LOSS hit for RELIANCE" |
-| **Target Hit** | "🎯 TARGET hit for RELIANCE" |
-| **Position Closed** | "📤 Position closed: RELIANCE | P&L: ₹+150" |
-| **Daily Summary** | Position details, P&L, risk metrics every minute |
+| **Bot Start** | "🤖 Alert-Only Bot Started" with watchlist |
+| **Signal Alert** | Natural language: "{symbol} is showing bullish momentum with {strategy} at ₹{price}" |
+| **Strong Signal** | "🔥 {symbol} just triggered a strong {strategy} buy signal!" |
+| **Market Summary** | Every 90 seconds: detailed overview with buy/sell signals and sentiment |
+| **Bot Stop** | "🛑 Alert Bot Stopped" |
+
+### Example Alerts
+
+**Buy Signal:**
+```
+🟢 Strong BUY signal on RELIANCE! MACD is firing with high conviction at ₹2,450. 
+This one's worth watching closely.
+
+💡 MACD crossed above zero (bullish)
+⏰ 10:30 AM
+```
+
+**Market Summary:**
+```
+📊 Market Update — 11:00 AM
+
+Midday check-in — reviewing what's happening across the watchlist:
+
+🟢 Buy Signals (2):
+• INFY — RSI Mean Reversion @ ₹1,520 (85% strength)
+• TCS — Bollinger Bands @ ₹3,850 (72% strength)
+
+🔴 Sell Signals (1):
+• HDFCBANK — MACD @ ₹1,620 (68% strength)
+
+Active session — several signals detected across the watchlist.
+
+📡 Scanning 21 stocks | 45 scans completed
+```
 
 ---
 
@@ -174,7 +204,6 @@ All activity is logged to the `logs/` directory:
 |------|---------|
 | `scan_YYYY-MM-DD.jsonl` | All market scans |
 | `signal_YYYY-MM-DD.jsonl` | Trading signals |
-| `trade_YYYY-MM-DD.jsonl` | Order executions |
 | `daily_summary.json` | End-of-day summary |
 
 ---
@@ -185,8 +214,9 @@ All activity is logged to the `logs/` directory:
 - **Cost**: Free tier (750 hours/month)
 - **Setup**: See [DEPLOY_GUIDE.md](./DEPLOY_GUIDE.md)
 - **Health Check**: `/health` endpoint required
+- **URL**: https://zerodha-bot.onrender.com
 
-### Oracle Cloud (Best Performance)
+### Alternative: Oracle Cloud (Best Performance)
 - **Cost**: Free forever (2 ARM cores, 24GB RAM)
 - **Setup**: SSH to VM, install Node.js, run with PM2
 - **Advantage**: No timeout, full WebSocket support
@@ -205,7 +235,7 @@ docker run -p 3000:3000 --env-file .env zerodha-bot
 ## ⚠️ Important Disclaimers
 
 1. **Trading involves risk of loss** - This software is for educational purposes only
-2. **Test thoroughly** - Always start with `TRADING_MODE=paper`
+2. **Alert-Only Mode** - This bot does NOT execute trades
 3. **Past performance ≠ future results** - Backtests don't guarantee profitability
 4. **API rate limits** - Kite API has limits; monitor your usage
 5. **Token expiration** - Access tokens expire every 24 hours; refresh as needed
@@ -250,4 +280,4 @@ MIT License - Use at your own risk.
 
 ---
 
-**Built with ❤️ for automated trading**
+**Built with ❤️ for informed trading decisions**
