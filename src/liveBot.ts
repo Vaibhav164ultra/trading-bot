@@ -2,6 +2,8 @@
  * Live trading bot - Alert Only Mode
  * Sends detailed, AI-like market alerts during market hours
  * No trading execution - monitoring and analysis only
+ *
+ * RESILIENT VERSION: Handles rate limits gracefully with fallbacks
  */
 
 import { KiteClient } from './kiteClient.js';
@@ -14,11 +16,12 @@ import type { Candle, StrategySignal, Ticker } from './types.js';
 const MARKET_OPEN = { hour: 9, minute: 15 };
 const MARKET_CLOSE = { hour: 15, minute: 30 };
 const STRONG_SIGNAL_THRESHOLD = 0.55;
-const ALERT_INTERVAL = 30000; // 30 seconds
-const SUMMARY_INTERVAL = 120000; // 2 minutes for detailed summary
-const SIGNAL_COOLDOWN = 180000; // 3 minutes cooldown per symbol per strategy
-const GLOBAL_ALERT_COOLDOWN = 15000; // 15 seconds between any alerts
-const API_CALL_DELAY = 500; // 500ms delay between API calls
+const ALERT_INTERVAL = 60000; // 1 minute (reduced frequency)
+const SUMMARY_INTERVAL = 180000; // 3 minutes for detailed summary
+const SIGNAL_COOLDOWN = 300000; // 5 minutes cooldown per symbol per strategy
+const GLOBAL_ALERT_COOLDOWN = 30000; // 30 seconds between any alerts
+const API_RETRY_DELAY = 10000; // 10 seconds between retries
+const MAX_RETRIES = 3;
 
 interface SymbolState {
   symbol: string;
@@ -26,6 +29,7 @@ interface SymbolState {
   candles: Candle[];
   lastSignalTime: Record<string, number>;
   currentPrice: number;
+  retryCount: number;
 }
 
 interface BotStats {
@@ -33,6 +37,7 @@ interface BotStats {
   signalsFired: number;
   alertsSent: number;
   errors: number;
+  rateLimits: number;
   startedAt: Date;
 }
 
@@ -91,6 +96,7 @@ export class LiveBot {
     signalsFired: 0,
     alertsSent: 0,
     errors: 0,
+    rateLimits: 0,
     startedAt: new Date(),
   };
   private pollingTimer: NodeJS.Timeout | null = null;
@@ -99,6 +105,8 @@ export class LiveBot {
   private lastAlertKey = '';
   private lastSummaryTime = 0;
   private lastGlobalAlertTime = 0;
+  private lastRateLimitTime = 0;
+  private rateLimitActive = false;
 
   constructor() {
     this.kiteClient = new KiteClient(this.config.KITE_ACCESS_TOKEN);
@@ -107,50 +115,66 @@ export class LiveBot {
   }
 
   /**
-   * Delay helper to prevent rate limiting
+   * Delay helper
    */
   private async delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  async addSymbol(symbol: string, token: number): Promise<void> {
-    // Fetch fewer candles to avoid rate limits - only need 100 for analysis
-    const candles = await this.kiteClient.getHistoricalCandles(
-      token,
-      10, // 10 days instead of 365
-      this.config.TIMEFRAME
-    );
-
-    await this.delay(API_CALL_DELAY); // Small delay between calls
-
-    this.watchlist.push({
-      symbol,
-      token,
-      candles,
-      lastSignalTime: {},
-      currentPrice: candles.length > 0 ? candles[candles.length - 1].close : 0,
-    });
-
-    console.log(`📌 Added ${symbol} (token: ${token}, ${candles.length} historical candles)`);
+  /**
+   * Send message to Telegram (with rate limit awareness)
+   */
+  async safeSend(text: string): Promise<void> {
+    if (!this.telegram.isConnected) return;
+    await this.telegram.send(text);
   }
 
   async initialize(): Promise<void> {
-    // Send initial confirmation immediately (before heavy API calls)
+    // Send initial confirmation immediately
     if (this.telegram.isConnected) {
-      await this.telegram.send(
-        `🤖 <b>Initializing Bot...</b>\n\nMode: <b>ALERTS ONLY</b>\nLoading watchlist...`
-      );
+      await this.safeSend(`🤖 <b>Initializing Bot...</b>\n\nMode: <b>ALERTS ONLY</b>\nChecking Kite API connection...`);
     }
 
-    await this.delay(2000); // Wait before making API calls
+    await this.delay(1000);
 
-    // Fetch instruments list
-    const instruments = await this.kiteClient.getInstruments('NSE');
+    // Try to fetch instruments with retries
+    let instruments: any[] = [];
+    let success = false;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`🔄 Attempt ${attempt}/${MAX_RETRIES} to fetch instruments...`);
+        instruments = await this.kiteClient.getInstruments('NSE');
+        console.log(`✅ Fetched ${instruments.length} instruments`);
+        success = true;
+        break;
+      } catch (error: any) {
+        console.error(`❌ Attempt ${attempt} failed:`, error.message);
+        this.stats.errors++;
+
+        if (error.message?.includes('Too many requests')) {
+          this.stats.rateLimits++;
+          console.log(`⚠️  Rate limit detected. Waiting ${API_RETRY_DELAY / 1000} seconds...`);
+          await this.telegram.send(`⚠️  Rate limited by Kite API. Waiting ${API_RETRY_DELAY / 1000} seconds before retry...`);
+          await this.delay(API_RETRY_DELAY);
+        } else if (attempt === MAX_RETRIES) {
+          console.error('❌ Failed after', MAX_RETRIES, 'attempts');
+          throw error;
+        } else {
+          await this.delay(2000);
+        }
+      }
+    }
+
+    if (!success || instruments.length === 0) {
+      throw new Error('Failed to fetch instruments from Kite API');
+    }
+
+    // Parse watchlist
     const symbols = this.config.WATCHLIST.split(',').map(s => s.trim()).filter(Boolean);
+    console.log(`\nLoading ${symbols.length} symbols from watchlist...`);
 
-    console.log(`Found ${instruments.length} instruments in NSE`);
-
-    // Add symbols with delays between each
+    // Add symbols one by one with delays
     for (let i = 0; i < symbols.length; i++) {
       const symbol = symbols[i];
       const instrument = instruments.find((inst: any) => inst.tradingsymbol === symbol);
@@ -158,34 +182,71 @@ export class LiveBot {
       if (instrument) {
         try {
           await this.addSymbol(symbol, instrument.instrument_token);
+
+          // Send progress update every 5 symbols
+          if ((i + 1) % 5 === 0 && this.telegram.isConnected) {
+            await this.safeSend(`📊 Loading watchlist: ${i + 1}/${symbols.length} symbols...`);
+          }
         } catch (error: any) {
           console.error(`⚠️  Failed to add ${symbol}:`, error.message);
+          this.stats.errors++;
+
+          // If rate limited, wait and continue
           if (error.message?.includes('Too many requests')) {
-            console.log(`   Waiting 5 seconds before continuing...`);
-            await this.delay(5000);
-            // Try again once
-            try {
-              await this.addSymbol(symbol, instrument.instrument_token);
-            } catch (retryError) {
-              console.error(`   Still failed after retry`);
-            }
+            this.stats.rateLimits++;
+            await this.telegram.send(`⚠️  Rate limited. Waiting before continuing...`);
+            await this.delay(API_RETRY_DELAY);
           }
         }
       } else {
         console.warn(`⚠️  Symbol "${symbol}" not found in NSE instruments`);
       }
+
+      // Small delay between symbols
+      if (i < symbols.length - 1) {
+        await this.delay(1000);
+      }
     }
 
     if (this.watchlist.length === 0) {
-      throw new Error('No valid symbols in watchlist. Check WATCHLIST in .env');
+      throw new Error('No valid symbols loaded. Check WATCHLIST and Kite API credentials.');
     }
+
+    console.log(`\n✅ Successfully loaded ${this.watchlist.length} symbols for monitoring\n`);
 
     // Subscribe to WebSocket
     const tokens = this.watchlist.map(s => s.token);
     this.webSocket.subscribe(tokens);
     this.webSocket.onTick(this.handleTick.bind(this));
 
-    console.log(`\n✅ Initialized ${this.watchlist.length} symbols for live monitoring\n`);
+    // Send success confirmation
+    if (this.telegram.isConnected) {
+      await this.safeSend(`✅ <b>Bot Initialized Successfully</b>\n\nWatchlist: ${this.watchlist.map(s => s.symbol).join(', ')}\n\nStarting market monitoring...`);
+    }
+
+    await this.delay(2000);
+  }
+
+  async addSymbol(symbol: string, token: number): Promise<void> {
+    // Fetch minimal historical data (just 5 candles for now)
+    let candles: Candle[] = [];
+    try {
+      candles = await this.kiteClient.getHistoricalCandles(token, 5, this.config.TIMEFRAME);
+    } catch (error: any) {
+      console.error(`Failed to fetch candles for ${symbol}:`, error.message);
+      // Continue with empty candles - will fetch later
+    }
+
+    this.watchlist.push({
+      symbol,
+      token,
+      candles,
+      lastSignalTime: {},
+      currentPrice: candles.length > 0 ? candles[candles.length - 1].close : 0,
+      retryCount: 0,
+    });
+
+    console.log(`📌 Added ${symbol} (token: ${token}, ${candles.length} candles)`);
   }
 
   async start(): Promise<void> {
@@ -210,12 +271,10 @@ export class LiveBot {
 
     // Send startup message
     if (this.telegram.isConnected) {
-      await this.telegram.send(
-        `🤖 <b>Alert-Only Bot Started</b>\n\nMode: <b>ALERTS ONLY</b>\nWatchlist: ${this.watchlist.map(s => s.symbol).join(', ')}\n\nI'll send you detailed market updates every 2 minutes during trading hours. No trades will be placed.`
+      await this.safeSend(
+        `🤖 <b>Alert-Only Bot Started</b>\n\nMode: <b>ALERTS ONLY</b>\nWatchlist: ${this.watchlist.map(s => s.symbol).join(', ')}\n\nI'll send you detailed market updates every 3 minutes during trading hours (9:15 AM - 3:30 PM IST). No trades will be placed.`
       );
     }
-
-    await this.delay(2000);
 
     // Connect WebSocket
     try {
@@ -226,7 +285,7 @@ export class LiveBot {
       console.log('   Bot will continue with polling mode');
     }
 
-    console.log('📡 Starting polling mode (30s intervals)...');
+    console.log('📡 Starting polling mode (1min intervals)...');
     this.pollingTimer = setInterval(() => this.pollMarketData(), ALERT_INTERVAL);
     this.summaryTimer = setInterval(() => this.sendSummary(), SUMMARY_INTERVAL);
 
@@ -250,13 +309,14 @@ export class LiveBot {
       lastCandle.volume = ticker.volume;
     }
 
-    if (state.candles.length >= 50) {
+    if (state.candles.length >= 10) {
       this.analyzeSymbol(state);
     }
   }
 
   private async analyzeSymbol(state: SymbolState): Promise<void> {
     if (!this.isMarketHours()) return;
+    if (this.rateLimitActive) return;
 
     // Check global alert cooldown
     const now = Date.now();
@@ -332,7 +392,7 @@ export class LiveBot {
     const time = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
     message += `\n⏰ ${time}`;
 
-    await this.telegram.send(message.trim());
+    await this.safeSend(message.trim());
     this.stats.alertsSent++;
   }
 
@@ -348,6 +408,7 @@ export class LiveBot {
   private async sendSummary(): Promise<void> {
     if (!this.isRunning) return;
     if (!this.isMarketHours()) return;
+    if (this.rateLimitActive) return;
 
     // Check cooldown
     const now = Date.now();
@@ -359,7 +420,7 @@ export class LiveBot {
     const signals: Array<{ symbol: string; strategy: string; signal: StrategySignal; price: number }> = [];
 
     for (const state of this.watchlist) {
-      if (state.candles.length < 50) continue;
+      if (state.candles.length < 10) continue;
 
       for (const name of listStrategies()) {
         const strategy = getStrategy(name);
@@ -380,7 +441,7 @@ export class LiveBot {
     }
 
     const summary = this.generateMarketSummary(signals);
-    await this.telegram.send(summary);
+    await this.safeSend(summary);
   }
 
   private generateMarketSummary(signals: Array<{ symbol: string; strategy: string; signal: StrategySignal; price: number }>): string {
@@ -451,18 +512,18 @@ export class LiveBot {
 
   private async pollMarketData(): Promise<void> {
     if (!this.isRunning) return;
+    if (this.rateLimitActive) return;
 
     this.stats.scansCompleted++;
 
     for (const state of this.watchlist) {
       try {
+        // Fetch just 1 day of recent data
         const candles = await this.kiteClient.getHistoricalCandles(
           state.token,
           1,
           this.config.TIMEFRAME
         );
-
-        await this.delay(API_CALL_DELAY);
 
         if (candles.length > 0) {
           const latestCandle = candles[0];
@@ -470,26 +531,41 @@ export class LiveBot {
           if (state.candles.length === 0 ||
               Math.abs(state.candles[state.candles.length - 1].close - latestCandle.close) > 0.01) {
             state.candles.push(latestCandle);
-            if (state.candles.length > 500) {
-              state.candles = state.candles.slice(-500);
+            if (state.candles.length > 200) {
+              state.candles = state.candles.slice(-200);
             }
             state.currentPrice = latestCandle.close;
+            state.retryCount = 0;
           }
 
-          if (state.candles.length >= 50) {
+          if (state.candles.length >= 10) {
             await this.analyzeSymbol(state);
           }
         }
       } catch (error: any) {
         console.error(`Error polling ${state.symbol}:`, error.message);
         this.stats.errors++;
+        state.retryCount++;
 
-        // Handle rate limiting gracefully
+        // Handle rate limiting
         if (error.message?.includes('Too many requests')) {
-          console.log(`   Rate limited. Waiting 10 seconds...`);
-          await this.delay(10000);
+          this.stats.rateLimits++;
+          this.rateLimitActive = true;
+          this.lastRateLimitTime = Date.now();
+
+          console.log(`⚠️  Rate limit hit for ${state.symbol}. Pausing for 30 seconds...`);
+          await this.telegram.send(`⚠️  Rate limited by Kite API. Pausing for 30 seconds...`);
+
+          await this.delay(30000);
+          this.rateLimitActive = false;
+
+          // Break to avoid hammering the API
+          break;
         }
       }
+
+      // Small delay between symbols
+      await this.delay(500);
     }
   }
 
