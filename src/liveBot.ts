@@ -305,23 +305,32 @@ export class LiveBot {
     const metrics = this.executor.getRiskMetrics();
     const uptime = this.formatUptime();
 
-    let message = `📊 <b>Bot Summary</b>\n`;
-    message += `Uptime: ${uptime}\n`;
-    message += `Scans: ${this.stats.scansCompleted} | Signals: ${this.stats.signalsFired} | Orders: ${this.stats.ordersPlaced}\n\n`;
+    // Only send if there are positions or it's market hours
+    const now = new Date();
+    const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const hour = ist.getHours();
+    const minute = ist.getMinutes();
+    const totalMin = hour * 60 + minute;
+    const isMarketHours = totalMin >= (9 * 60 + 15) && totalMin <= (15 * 60 + 30);
+
+    if (positions.length === 0 && !isMarketHours) return;
+
+    let message = `📊 <b>Market Update</b>\n`;
+    message += `Time: ${ist.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}\n\n`;
 
     if (positions.length > 0) {
-      message += `<b>Open Positions:</b>\n`;
+      message += `<b>Positions:</b>\n`;
       for (const pos of positions) {
         const pnlEmoji = pos.unrealizedPnl >= 0 ? '🟢' : '🔴';
-        message += `${pnlEmoji} ${pos.symbol}: ${pos.side} ×${pos.quantity} @ ₹${pos.entryPrice.toFixed(0)}\n`;
-        message += `  Current: ₹${pos.currentPrice.toFixed(0)} | P&L: ${pnlEmoji}₹${pos.unrealizedPnl.toFixed(0)} (${pos.unrealizedPct.toFixed(2)}%)\n`;
+        message += `${pnlEmoji} ${pos.symbol}: ${pos.side} ×${pos.quantity}\n`;
+        message += `  Entry: ₹${pos.entryPrice.toFixed(0)} → Current: ₹${pos.currentPrice.toFixed(0)}\n`;
+        message += `  P&L: ${pnlEmoji}₹${pos.unrealizedPnl.toFixed(0)} (${pos.unrealizedPct.toFixed(2)}%)\n`;
         message += `  SL: ₹${pos.stopLoss.toFixed(0)} | Target: ₹${pos.target.toFixed(0)}\n`;
       }
       message += '\n';
     }
 
-    message += `<b>Risk:</b> Daily P&L: ₹${metrics.dailyPnl.toFixed(0)} (${metrics.dailyPnlPct.toFixed(2)}%)\n`;
-    message += `Exposure: ₹${metrics.totalExposure.toFixed(0)} / ₹${metrics.marginAvailable.toFixed(0)} available`;
+    message += `<b>Risk:</b> Daily P&L: ₹${metrics.dailyPnl.toFixed(0)} | Positions: ${metrics.openPositions}`;
 
     await this.telegram.send(message.trim());
   }
