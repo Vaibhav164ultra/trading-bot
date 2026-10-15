@@ -31,6 +31,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3000),
   LOG_LEVEL: z.string().default('info'),
 
+  // Live bot
+  WEBSOCKET_RECONNECT_MS: z.coerce.number().default(5000),
+  ORDER_TIMEOUT_MS: z.coerce.number().default(30000),
+
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),

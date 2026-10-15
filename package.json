@@ -1,19 +1,26 @@
 {
   "name": "zerodha-trading-analysis-execution",
-  "version": "1.0.0",
-  "description": "Zerodha Kite Connect trading analysis, strategy backtesting, and automated execution system.",
+  "version": "2.0.0",
+  "description": "Zerodha Kite Connect trading analysis, strategy backtesting, and live automated execution system.",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/live.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "test": "vitest run",
+    "start": "node dist/live.js",
+    "start:scan": "node dist/index.js --auto",
+    "live": "tsx watch src/live.ts",
     "scan": "tsx src/index.ts --auto",
+    "test": "vitest run",
     "setup:scheduler": "tsx setup-scheduler.mjs",
-    "start:auto": "tsx src/index.ts --auto"
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:delete": "pm2 delete ecosystem.config.js",
+    "pm2:logs": "pm2 logs zerodha-bot"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/ws": "^8.18.2",
     "tsx": "^4.23.15",
     "typescript": "^5.5.0",
     "vitest": "^2.1.0"
@@ -22,6 +29,7 @@
     "dotenv": "^16.4.5",
     "kiteconnect": "^5.3.0",
     "node-telegram-bot-api": "^2.1.0",
+    "ws": "^8.22.0",
     "zod": "^3.23.8"
   }
 }

@@ -107,6 +107,23 @@ export class TradingLogger {
   }
 
   /**
+   * Save order execution
+   */
+  static logOrder(action: 'open' | 'close', symbol: string, order: any, pnl?: number): void {
+    const entry: LogEntry = {
+      timestamp: new Date().toISOString(),
+      type: 'trade',
+      symbol,
+      data: {
+        action,
+        order,
+        pnl,
+      },
+    };
+    this.log(entry);
+  }
+
+  /**
    * Save daily summary
    */
   static logDailySummary(summary: {

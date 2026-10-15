@@ -1,6 +1,6 @@
 /**
  * Zerodha Trading Analysis & Execution System
- * Main entry point
+ * Main entry point — supports analysis, paper, and live trading modes
  */
 
 import 'dotenv/config';
@@ -10,17 +10,22 @@ import { getStrategy, listStrategies } from './strategies.js';
 import { PaperTradingEngine } from './paperTrading.js';
 import { TelegramNotifier } from './telegram.js';
 import { AutoTrader } from './autoTrader.js';
+import { LiveBot } from './liveBot.js';
 import type { Candle, StrategySignal } from './types.js';
 
 async function main() {
   const config = getConfig();
-  const isAutoMode = process.argv.includes('--auto') || process.argv.includes('--scan');
+  const args = process.argv.slice(2);
+  const mode = args[0] ?? 'paper'; // 'paper' | 'live' | 'scan'
+  const isAutoMode = args.includes('--auto') || mode === 'scan';
+  const isLiveMode = mode === 'live';
 
   console.log('🚀 Zerodha Trading System Starting...');
-  console.log(`Mode: ${isAutoMode ? '🔄 AUTO-SCAN' : '📊 ONE-TIME ANALYSIS'}`);
+  console.log(`Mode: ${isLiveMode ? '🔴 LIVE TRADING' : isAutoMode ? '🔄 AUTO-SCAN' : '📊 ONE-TIME ANALYSIS'}`);
   console.log(`Timeframe: ${config.TIMEFRAME}`);
   console.log(`Historical Days: ${config.HISTORICAL_DAYS}`);
   console.log(`Watchlist: ${config.WATCHLIST}`);
+  console.log(`Trading Mode: ${config.TRADING_MODE}`);
 
   const kiteClient = new KiteClient(config.KITE_ACCESS_TOKEN);
   const telegram = new TelegramNotifier();
@@ -41,10 +46,45 @@ async function main() {
     return;
   }
 
-  if (isAutoMode) {
-    // AUTO-SCAN MODE — runs continuously during market hours
+  if (isLiveMode) {
+    // ── LIVE TRADING MODE ──────────────────────────────────────────────────
+    console.log('\n🔴 LIVE TRADING MODE ENABLED');
+    console.log('WebSocket + order execution active.\n');
+
+    const bot = new LiveBot();
+
+    // Parse watchlist
+    const symbols = config.WATCHLIST.split(',').map(s => s.trim()).filter(Boolean);
+    const instruments = await kiteClient.getInstruments('NSE');
+
+    for (const symbol of symbols) {
+      const instrument = instruments.find((i: any) => i.tradingsymbol === symbol);
+      if (instrument) {
+        await bot.addSymbol(symbol, instrument.instrument_token);
+      } else {
+        console.warn(`⚠️  Symbol "${symbol}" not found in NSE instruments`);
+      }
+    }
+
+    if (bot['watchlist'].length === 0) {
+      console.error('❌ No valid symbols in watchlist. Check WATCHLIST in .env');
+      return;
+    }
+
+    await bot.initialize();
+    await bot.start();
+
+    // Keep running
+    process.on('SIGINT', () => {
+      console.log('\n🛑 Stopping live bot...');
+      bot.stop();
+      process.exit(0);
+    });
+
+  } else if (isAutoMode) {
+    // ── AUTO-SCAN MODE (analysis only) ─────────────────────────────────────
     console.log('\n🤖 Auto-Scan Mode Enabled');
-    console.log('This will scan your watchlist every 30 minutes during market hours.');
+    console.log('This will scan your watchlist every 10 minutes during market hours.');
     console.log('Press Ctrl+C to stop.\n');
 
     const autoTrader = new AutoTrader();
@@ -77,7 +117,7 @@ async function main() {
     });
 
   } else {
-    // ONE-TIME ANALYSIS MODE
+    // ── ONE-TIME ANALYSIS MODE ─────────────────────────────────────────────
     // List available strategies
     console.log('\n📊 Available Strategies:');
     for (const name of listStrategies()) {

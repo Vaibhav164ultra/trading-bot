@@ -155,6 +155,21 @@ export interface KiteHolding {
 }
 
 // ---------------------------------------------------------------------------
+// WebSocket Types
+// ---------------------------------------------------------------------------
+
+export interface Ticker {
+  instrumentToken: number;
+  lastPrice: number;
+  timestamp: Date;
+  volume: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
+// ---------------------------------------------------------------------------
 // Strategy Types
 // ---------------------------------------------------------------------------
 
